@@ -374,4 +374,49 @@ final class SyncEngineTests: XCTestCase {
 
         XCTAssertTrue(expired)
     }
+
+    // MARK: - Última sincronización
+
+    private func freshDefaults(_ name: String) -> UserDefaults {
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        return d
+    }
+
+    func test_syncExitosa_registraLastSyncedAt() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let fixed = Date(timeIntervalSince1970: 5_000)
+        let engine = SyncEngine(database: db, api: StubSyncAPI(),
+                                now: { fixed },
+                                defaults: freshDefaults("test.lastsync.ok"))
+        XCTAssertNil(engine.lastSyncedAt)
+
+        await engine.syncDown()
+
+        XCTAssertEqual(engine.lastSyncedAt, fixed)
+    }
+
+    func test_syncFallida_noRegistraLastSyncedAt() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let api = StubSyncAPI()
+        api.fetchError = APIError.server(status: 500)
+        let engine = SyncEngine(database: db, api: api,
+                                now: { Date(timeIntervalSince1970: 1) },
+                                defaults: freshDefaults("test.lastsync.fail"))
+
+        await engine.syncDown()
+
+        XCTAssertNil(engine.lastSyncedAt, "una bajada fallida no actualiza el timestamp")
+    }
+
+    func test_lastSyncedAt_seCargaDeDefaultsAlIniciar() throws {
+        let db = try AppDatabase.makeInMemory()
+        let defaults = freshDefaults("test.lastsync.persist")
+        let previo = Date(timeIntervalSince1970: 9_999)
+        defaults.set(previo, forKey: "sync.lastSyncedAt")
+
+        let engine = SyncEngine(database: db, api: StubSyncAPI(), defaults: defaults)
+
+        XCTAssertEqual(engine.lastSyncedAt, previo, "sobrevive reinicios de la app")
+    }
 }

@@ -15,13 +15,32 @@ final class SyncEngine: ObservableObject {
 
     @Published private(set) var isSyncing = false
     @Published private(set) var lastError: String?
+    /// Momento (hora del dispositivo) de la última sincronización exitosa. Persistido
+    /// para sobrevivir reinicios de la app. `nil` si nunca se sincronizó.
+    @Published private(set) var lastSyncedAt: Date?
+
+    private let now: () -> Date
+    private let defaults: UserDefaults
+    private static let lastSyncKey = "sync.lastSyncedAt"
 
     init(database: AppDatabase,
          api: SyncDownAPI & SyncUpAPI,
-         onUnauthorized: @escaping () -> Void = {}) {
+         onUnauthorized: @escaping () -> Void = {},
+         now: @escaping () -> Date = Date.init,
+         defaults: UserDefaults = .standard) {
         self.database = database
         self.api = api
         self.onUnauthorized = onUnauthorized
+        self.now = now
+        self.defaults = defaults
+        self.lastSyncedAt = defaults.object(forKey: Self.lastSyncKey) as? Date
+    }
+
+    /// Registra una sincronización exitosa (actualiza y persiste el timestamp).
+    private func recordSyncSuccess() {
+        let timestamp = now()
+        lastSyncedAt = timestamp
+        defaults.set(timestamp, forKey: Self.lastSyncKey)
     }
 
     private var ordersRepo: OrdersRepository { OrdersRepository(database: database) }
@@ -38,6 +57,7 @@ final class SyncEngine: ObservableObject {
             let failedUploads = try await pushConfirmedOrders()
             try await pullCatalog()
             try await pullClients()
+            recordSyncSuccess()
             if failedUploads > 0 {
                 lastError = "\(failedUploads) orden(es) sin subir. Se reintentará."
             }
@@ -56,6 +76,7 @@ final class SyncEngine: ObservableObject {
         do {
             try await pullCatalog()
             try await pullClients()
+            recordSyncSuccess()
         } catch APIError.unauthorized {
             onUnauthorized()
         } catch {

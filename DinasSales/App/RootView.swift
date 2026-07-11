@@ -27,6 +27,8 @@ struct RootView: View {
 /// Home: saludo, sincronización y cierre de sesión.
 struct HomeView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @EnvironmentObject private var sync: SyncEngine
+    @EnvironmentObject private var network: NetworkMonitor
 
     var body: some View {
         NavigationStack {
@@ -41,7 +43,7 @@ struct HomeView: View {
                     .font(.title3.weight(.medium))
                     .multilineTextAlignment(.center)
 
-                if let error = environment.sync.lastError {
+                if let error = sync.lastError {
                     Text(error)
                         .font(.callout)
                         .foregroundStyle(.red)
@@ -49,20 +51,24 @@ struct HomeView: View {
                 }
 
                 Button {
-                    Task { await environment.sync.sync() }
+                    Task { await sync.sync() }
                 } label: {
                     HStack {
-                        if environment.sync.isSyncing {
+                        if sync.isSyncing {
                             ProgressView()
                         } else {
                             Image(systemName: "arrow.triangle.2.circlepath")
                         }
-                        Text(environment.sync.isSyncing ? "Sincronizando…" : "Sincronizar")
+                        Text(sync.isSyncing ? "Sincronizando…" : "Sincronizar")
                     }
                     .frame(maxWidth: 260)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(environment.sync.isSyncing)
+                .disabled(sync.isSyncing || !network.isOnline)
+
+                Text(lastSyncText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Spacer()
             }
@@ -74,6 +80,14 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// Texto de estado de la última sincronización (o aviso de que no hay red).
+    private var lastSyncText: String {
+        if !network.isOnline { return "Sin conexión — sincronización en pausa" }
+        guard let date = sync.lastSyncedAt else { return "Nunca sincronizado" }
+        let relative = date.formatted(.relative(presentation: .named))
+        return "Última sincronización: \(relative)"
     }
 
     private var saludo: String {

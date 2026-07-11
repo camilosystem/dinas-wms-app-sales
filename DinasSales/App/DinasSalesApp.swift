@@ -16,6 +16,7 @@ struct DinasSalesApp: App {
             AuthGate()
                 .environmentObject(environment)
                 .environmentObject(environment.network)
+                .environmentObject(environment.sync)
         }
     }
 }
