@@ -36,7 +36,12 @@
       "Bash(xcodebuild -list -project DinasSales.xcodeproj)",
       "Bash(xcodebuild build *)",
       "Bash(git commit -q -m 'build: target de app iOS \\(.xcodeproj\\) universal con GRDB \\(SPM\\) *)",
-      "Bash(git commit -q -m 'build: configuracion por ambiente \\(dev/staging/prod\\) via xcconfig *)"
+      "Bash(git commit -q -m 'build: configuracion por ambiente \\(dev/staging/prod\\) via xcconfig *)",
+      "Bash(swift Scripts/make_icon.swift DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
+      "Bash(sips -g pixelWidth -g pixelHeight DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
+      "Bash(sips -g pixelWidth -g pixelHeight -g hasAlpha DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
+      "Bash(sips -g hasAlpha DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
+      "Bash(git commit -q -m 'build\\(assets\\): icono de app \\(placeholder\\) + asset catalog *)"
     ]
   }
 }

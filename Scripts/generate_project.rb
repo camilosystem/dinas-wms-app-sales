@@ -71,6 +71,10 @@ end
 # Info.plist (no versionado dentro del grupo de compilación, solo referencia).
 app_group.new_file(File.join(ROOT, 'DinasSales', 'Resources', 'Info.plist'))
 
+# Asset catalog (icono de la app) como recurso.
+assets_ref = app_group.new_file(File.join(ROOT, 'DinasSales', 'Resources', 'Assets.xcassets'))
+app.add_resources([assets_ref])
+
 # GRDB como dependencia del target de app.
 app.package_product_dependencies << grdb_dep
 grdb_build_file = project.new(Xcodeproj::Project::Object::PBXBuildFile)
@@ -91,6 +95,8 @@ app.build_configurations.each do |config|
   s['DEVELOPMENT_LANGUAGE'] = 'es'
   s['CODE_SIGN_STYLE'] = 'Automatic'
   s['ENABLE_PREVIEWS'] = 'YES'
+  s['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
+  s['DEVELOPMENT_TEAM'] = ''   # <- Team ID de Apple para firmar (JAMF/enterprise)
   # MIDDLEWARE_BASE_URL y APP_DISPLAY_NAME llegan desde el .xcconfig del ambiente.
 end
 
