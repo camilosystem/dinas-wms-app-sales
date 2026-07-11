@@ -44,6 +44,8 @@ Decisiones clave:
 - **Protocolos** (`AuthAPI`, `SyncDownAPI`, `SyncUpAPI`, `TokenStore`) → todo testeable
   sin red ni Keychain real.
 - **Doble build:** `swift test` en host (macOS) para lógica; `.xcodeproj` para la app iOS.
+- **Base local versionada** con migraciones GRDB; las liberadas son inmutables (disciplina
+  en [docs/MIGRATIONS.md](docs/MIGRATIONS.md)).
 
 ## Cómo correr
 

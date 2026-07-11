@@ -50,7 +50,9 @@
       "Bash(git commit -q -m 'feat\\(sync\\): guard anti-concurrencia atomico en sync/syncDown *)",
       "Bash(git commit -q -m 'fix\\(orders\\): regla de precio \\(cero valido, null no ordenable\\) + USD fijo *)",
       "Bash(git commit -q -m 'ci: GitHub Actions \\(swift test + build iOS\\) en PRs y main *)",
-      "Bash(git commit -q -m 'feat\\(sync\\): ultima sincronizacion en Home + deshabilitar sync offline *)"
+      "Bash(git commit -q -m 'feat\\(sync\\): ultima sincronizacion en Home + deshabilitar sync offline *)",
+      "Bash(git commit -q -m 'docs: README del repo \\(arquitectura, como correr, ambientes, reglas\\) *)",
+      "Bash(git commit -q -m 'docs: disciplina de migraciones \\(comentario en el migrador + MIGRATIONS.md\\) *)"
     ]
   }
 }

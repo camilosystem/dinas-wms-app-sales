@@ -36,11 +36,26 @@ struct AppDatabase {
     }
 
     // MARK: - Migraciones
+    //
+    // DISCIPLINA DE MIGRACIONES (ver docs/MIGRATIONS.md):
+    //
+    // 1. Una migración registrada y liberada es INMUTABLE. `v1_esquema_inicial` ya está
+    //    en dispositivos de vendedores: NO se edita. Cualquier cambio de esquema va en una
+    //    migración NUEVA (`v2_...`, `v3_...`) que se AÑADE al final.
+    // 2. Las migraciones son ADITIVAS y preservan datos: `ADD COLUMN`, `CREATE TABLE`,
+    //    nuevos índices. Evitar operaciones destructivas (renombrar/eliminar columnas con
+    //    datos); si son inevitables, migrar los datos dentro de la misma migración.
+    // 3. `eraseDatabaseOnSchemaChange` está activo SOLO en DEBUG: recrea la base al cambiar
+    //    una migración ya aplicada (comodidad de desarrollo). En release NO existe, así que
+    //    editar una migración liberada dejaría bases inconsistentes en campo.
+    // 4. El identificador de cada migración es su clave: no reutilizar ni renombrar los ya
+    //    liberados.
 
     private var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
         #if DEBUG
-        // Durante desarrollo, recrea la base si cambian migraciones ya aplicadas.
+        // Solo desarrollo: recrea la base si cambia una migración YA aplicada. En release
+        // no aplica — por eso las migraciones liberadas son inmutables (ver arriba).
         migrator.eraseDatabaseOnSchemaChange = true
         #endif
 
@@ -100,6 +115,14 @@ struct AppDatabase {
                 t.column("last_synced_at", .datetime)
             }
         }
+
+        // Las futuras migraciones se AÑADEN aquí, nunca editando las anteriores. Ej.:
+        //
+        //   migrator.registerMigration("v2_agrega_notas_a_items") { db in
+        //       try db.alter(table: "items") { t in
+        //           t.add(column: "internal_notes", .text)
+        //       }
+        //   }
 
         return migrator
     }
