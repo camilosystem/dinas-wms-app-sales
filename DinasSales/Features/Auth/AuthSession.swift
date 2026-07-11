@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Estado de sesión del vendedor. Fuente de verdad para saber si hay que mostrar el
 /// login o la app. El token vive en el `TokenStore` (Keychain en producción).
@@ -46,11 +47,15 @@ final class AuthSession: ObservableObject {
             try store.save(response.token)
             displayName = response.displayName
             state = .signedIn
+            AppLog.auth.info("login exitoso")
         } catch APIError.unauthorized {
+            AppLog.auth.warning("login: credenciales inválidas")
             errorMessage = "Usuario o contraseña incorrectos."
         } catch APIError.missingBaseURL {
+            AppLog.auth.error("login: falta MIDDLEWARE_BASE_URL")
             errorMessage = "Falta configurar la URL del middleware."
         } catch {
+            AppLog.auth.error("login: error \(String(describing: error), privacy: .public)")
             errorMessage = "No se pudo iniciar sesión. Revisa la conexión."
         }
     }
@@ -64,6 +69,7 @@ final class AuthSession: ObservableObject {
 
     /// La sesión expiró (401 del middleware): limpia el token y pide re-login.
     func sessionExpired() {
+        AppLog.auth.warning("sesión expirada (401)")
         try? store.clear()
         displayName = nil
         errorMessage = "Tu sesión expiró. Inicia sesión de nuevo."

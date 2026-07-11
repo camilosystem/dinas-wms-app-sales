@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Superficie de autenticación (login público, sin token).
 protocol AuthAPI {
@@ -114,6 +115,8 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
         guard let http = response as? HTTPURLResponse else {
             throw APIError.server(status: -1)
         }
+        // Método + path + estado. Sin body ni cabeceras (evita loguear el token).
+        AppLog.api.debug("\(request.httpMethod ?? "?", privacy: .public) \(request.url?.path ?? "?", privacy: .public) → \(http.statusCode, privacy: .public)")
         switch http.statusCode {
         case 200..<300:
             return try JSONCoding.decoder.decode(T.self, from: data)

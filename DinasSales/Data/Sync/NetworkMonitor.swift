@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 
 /// Observa la conectividad y dispara una acción al RECUPERAR la red (transición
 /// offline → online). La app es offline-first; esto solo aprovecha la reconexión
@@ -26,7 +27,11 @@ final class NetworkMonitor: ObservableObject {
         let recovered = online && wasOffline
         wasOffline = !online
         isOnline = online
-        if recovered { onReconnect() }
+        AppLog.network.debug("red \(online ? "online" : "offline", privacy: .public)")
+        if recovered {
+            AppLog.network.info("red recuperada → auto-sync")
+            onReconnect()
+        }
     }
 
     deinit {

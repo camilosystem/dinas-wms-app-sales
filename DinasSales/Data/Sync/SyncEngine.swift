@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 /// Motor de sincronización. La sincronización es un evento aparte del uso normal:
 /// la app opera offline y sincroniza cuando hay red.
@@ -50,20 +51,29 @@ final class SyncEngine: ObservableObject {
     /// Si ya hay una sincronización en curso, no hace nada (evita subidas duplicadas
     /// por, p. ej., el botón manual y el auto-sync al reconectar disparando a la vez).
     func sync() async {
-        guard beginSync() else { return }
+        guard beginSync() else {
+            AppLog.sync.debug("sync ignorada: ya hay una en curso")
+            return
+        }
         defer { endSync() }
 
+        AppLog.sync.info("sync iniciada")
         do {
             let failedUploads = try await pushConfirmedOrders()
             try await pullCatalog()
             try await pullClients()
             recordSyncSuccess()
             if failedUploads > 0 {
+                AppLog.sync.warning("sync completada con \(failedUploads, privacy: .public) orden(es) sin subir")
                 lastError = "\(failedUploads) orden(es) sin subir. Se reintentará."
+            } else {
+                AppLog.sync.info("sync completada")
             }
         } catch APIError.unauthorized {
+            AppLog.sync.warning("sync: 401 no autorizado → re-login")
             onUnauthorized()
         } catch {
+            AppLog.sync.error("sync falló: \(String(describing: error), privacy: .public)")
             lastError = "No se pudo sincronizar. Revisa la conexión."
         }
     }
@@ -73,13 +83,17 @@ final class SyncEngine: ObservableObject {
         guard beginSync() else { return }
         defer { endSync() }
 
+        AppLog.sync.info("bajada iniciada")
         do {
             try await pullCatalog()
             try await pullClients()
             recordSyncSuccess()
+            AppLog.sync.info("bajada completada")
         } catch APIError.unauthorized {
+            AppLog.sync.warning("bajada: 401 no autorizado → re-login")
             onUnauthorized()
         } catch {
+            AppLog.sync.error("bajada falló: \(String(describing: error), privacy: .public)")
             lastError = "No se pudo sincronizar. Revisa la conexión."
         }
     }
@@ -113,6 +127,9 @@ final class SyncEngine: ObservableObject {
     func pushConfirmedOrders() async throws -> Int {
         let repo = ordersRepo
         let pending = try repo.confirmedOrders()
+        if !pending.isEmpty {
+            AppLog.sync.info("subiendo \(pending.count, privacy: .public) orden(es) confirmada(s)")
+        }
 
         var failed = 0
         for order in pending {
@@ -121,10 +138,12 @@ final class SyncEngine: ObservableObject {
                 let accepted = try await api.postOrder(order, lines: lines)
                 try repo.markSynced(orderUUID: order.clientUUID,
                                     orderNumber: accepted.orderNumber)
+                AppLog.sync.info("orden \(order.clientUUID, privacy: .public) sincronizada")
             } catch APIError.unauthorized {
                 throw APIError.unauthorized   // token expirado → detener y re-login
             } catch {
                 failed += 1                   // transitorio: se reintenta (mismo UUID)
+                AppLog.sync.error("orden \(order.clientUUID, privacy: .public) no se pudo subir: \(String(describing: error), privacy: .public)")
             }
         }
         return failed
@@ -142,6 +161,7 @@ final class SyncEngine: ObservableObject {
             }
             try SyncState(resource: "catalog", lastSyncedAt: page.serverTime).save(db)
         }
+        AppLog.sync.info("catálogo: \(page.items.count, privacy: .public) ítem(s) actualizados")
     }
 
     /// Descarga el delta de clientes asignados y lo persiste (upsert).
@@ -154,6 +174,7 @@ final class SyncEngine: ObservableObject {
             }
             try SyncState(resource: "clients", lastSyncedAt: page.serverTime).save(db)
         }
+        AppLog.sync.info("clientes: \(page.clients.count, privacy: .public) actualizados")
     }
 
     /// Marca de agua (`since`) guardada para un recurso, o `nil` en la primera bajada.

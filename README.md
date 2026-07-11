@@ -118,6 +118,19 @@ Cada build configuration apunta a su `Config/*.xcconfig`:
 - `swift test` (host macOS) — protege los 41 tests.
 - `xcodebuild build` del target de app para iOS Simulator — verifica que compila.
 
+## Observabilidad
+
+Logging estructurado con `os.Logger` (subsistema = bundle ID; categorías `sync`, `auth`,
+`api`, `network`). Para depurar la sync en el dispositivo de un vendedor:
+
+```bash
+log stream --predicate 'subsystem BEGINSWITH "com.dinas.sales"' --level debug
+```
+
+O en **Console.app** filtrando por el subsistema. Se loguean conteos, códigos de estado y
+UUIDs de orden (marcados `.public`); el JWT, contraseñas y datos del cliente **nunca** se
+loguean (van redactados por defecto).
+
 ## Distribución
 
 Ver [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md): firma (enterprise/in-house), generación
