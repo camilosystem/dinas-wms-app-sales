@@ -1,16 +1,6 @@
 import Foundation
 
-// ⚠️ SUPUESTO DE CONTRATO — PENDIENTE DE CONFIRMAR CON dinas-wms-contracts/openapi.yaml
-//
-// El contrato OpenAPI no está disponible en este entorno. Estos DTOs asumen el shape
-// más estándar para `POST /auth/login`:
-//
-//   Request:  { "username": "...", "password": "..." }
-//   Response: { "token": "<jwt>" }
-//
-// Es el ÚNICO lugar donde vive el formato de red de login. Cuando llegue el contrato,
-// ajustar aquí (nombres de campos, envoltura, campos extra como expiración/refresh).
-// Si difiere, es señal para el Arquitecto.
+// DTOs de autenticación según `openapi.yaml` (schemas LoginRequest / LoginResponse).
 
 /// Cuerpo de `POST /auth/login`.
 struct LoginRequest: Encodable {
@@ -18,7 +8,15 @@ struct LoginRequest: Encodable {
     let password: String
 }
 
-/// Respuesta de `POST /auth/login`. Se extrae el JWT que se guarda en Keychain.
-struct LoginResponse: Decodable {
-    let token: String
+/// Respuesta de `POST /auth/login`.
+struct LoginResponse: Decodable, Equatable {
+    let token: String               // JWT de acceso
+    let salespersonCode: String?    // código de vendedor asociado al usuario
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case token
+        case salespersonCode = "salesperson_code"
+        case displayName = "display_name"
+    }
 }

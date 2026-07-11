@@ -18,17 +18,19 @@ final class AppDatabaseTests: XCTestCase {
         let uuid = UUID().uuidString
 
         try appDB.dbQueue.write { db in
-            try Client(id: "C1", name: "Tienda Central", address: nil, updatedAt: nil).insert(db)
-            try Item(id: "I1", code: "A-100", name: "Producto", available: 10,
-                     comments: nil, imageURL: nil, updatedAt: nil).insert(db)
+            try Client(clientCode: "C1", name: "Tienda Central", address: nil, city: nil,
+                       zipcode: nil, managerName: nil, shippingRoute: nil).insert(db)
+            try Item(itemCode: "A-100", name: "Producto", category: nil, barcode: nil,
+                     comments: nil, price: 5.0, stock: 20, available: 10,
+                     imageURL: nil, active: true).insert(db)
 
-            try Order(clientUUID: uuid, clientID: "C1", status: .confirmed,
+            try Order(clientUUID: uuid, clientCode: "C1", status: .confirmed, notes: nil,
                       createdAt: Date(timeIntervalSince1970: 0),
-                      confirmedAt: Date(timeIntervalSince1970: 1),
-                      syncedAt: nil).insert(db)
+                      takenAt: Date(timeIntervalSince1970: 1),
+                      syncedAt: nil, orderNumber: nil).insert(db)
 
-            var line = OrderLine(id: nil, orderUUID: uuid, itemID: "I1",
-                                 quantity: 3, lineDiscount: 0.1)
+            var line = OrderLine(id: nil, orderUUID: uuid, itemCode: "A-100",
+                                 quantity: 3, unitPrice: 5.0, lineDiscountPct: 10, priceList: nil)
             try line.insert(db)
             XCTAssertNotNil(line.id, "order_lines.id debe autoincrementarse")
         }

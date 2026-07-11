@@ -14,7 +14,10 @@
       "Bash(swift test *)",
       "Bash(git commit -q -m 'fix: build/test del esqueleto en host y pin de dependencias *)",
       "Bash(find / -name \"openapi.y*ml\" 2>/dev/null | head; echo \"---parent dirs---\"; ls -la /Users/admin/Desktop/ 2>/dev/null | grep -i dinas; echo \"---contracts?---\"; find /Users/admin/Desktop -maxdepth 2 -iname \"*contract*\" 2>/dev/null)",
-      "Bash(git commit -q -m 'feat\\(auth\\): login por usuario/contraseña con JWT en Keychain *)"
+      "Bash(git commit -q -m 'feat\\(auth\\): login por usuario/contraseña con JWT en Keychain *)",
+      "Bash(perl -0pi -e 's/StubAuthAPI\\\\\\(result: \\\\.success\\\\\\(\"t\"\\\\\\)\\\\\\)/StubAuthAPI\\(token: \"t\"\\)/g; s/StubAuthAPI\\\\\\(result: \\\\.success\\\\\\(\"jwt-123\"\\\\\\)\\\\\\)/StubAuthAPI\\(token: \"jwt-123\"\\)/g; s/StubAuthAPI\\\\\\(result: \\\\.success\\\\\\(\"x\"\\\\\\)\\\\\\)/StubAuthAPI\\(token: \"x\"\\)/g' DinasSalesTests/AuthSessionTests.swift)",
+      "Bash(perl -0pi -e 's/try db\\\\.dbQueue\\\\.read \\\\{ db in/try await db.dbQueue.read { db in/g' DinasSalesTests/SyncEngineTests.swift)",
+      "Bash(git commit -q -m 'refactor: alinear modelos, DTOs y auth con openapi.yaml *)"
     ]
   }
 }

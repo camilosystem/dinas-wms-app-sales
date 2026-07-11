@@ -22,8 +22,14 @@ final class AppEnvironment: ObservableObject {
         } catch {
             fatalError("No se pudo abrir la base local: \(error)")
         }
-        self.api = APIClient(baseURL: AppConfig.middlewareBaseURL)
+        // El token del Keychain alimenta tanto al cliente HTTP (Authorization: Bearer)
+        // como a la sesión, para que ambos vean el mismo almacenamiento.
+        let tokenStore = KeychainTokenStore()
+        self.api = APIClient(
+            baseURL: AppConfig.middlewareBaseURL,
+            tokenProvider: { try? tokenStore.read() }
+        )
         self.sync = SyncEngine(database: database, api: api)
-        self.auth = AuthSession(api: api, store: KeychainTokenStore())
+        self.auth = AuthSession(api: api, store: tokenStore)
     }
 }

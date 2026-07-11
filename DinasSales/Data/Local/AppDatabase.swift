@@ -45,42 +45,56 @@ struct AppDatabase {
         #endif
 
         migrator.registerMigration("v1_esquema_inicial") { db in
+            // Catálogo (schema CatalogItem). available es double (ya calculado).
             try db.create(table: "items") { t in
-                t.primaryKey("id", .text)
-                t.column("code", .text).notNull().indexed()
+                t.primaryKey("item_code", .text)
                 t.column("name", .text).notNull()
-                t.column("available", .integer).notNull().defaults(to: 0)
+                t.column("category", .text)
+                t.column("barcode", .text).indexed()
                 t.column("comments", .text)
+                t.column("price", .double)
+                t.column("stock", .double)
+                t.column("available", .double).notNull().defaults(to: 0)
                 t.column("image_url", .text)
-                t.column("updated_at", .datetime)
+                t.column("active", .boolean).notNull().defaults(to: true)
             }
 
+            // Clientes asignados (schema Client).
             try db.create(table: "clients") { t in
-                t.primaryKey("id", .text)
+                t.primaryKey("client_code", .text)
                 t.column("name", .text).notNull()
                 t.column("address", .text)
-                t.column("updated_at", .datetime)
+                t.column("city", .text)
+                t.column("zipcode", .text)
+                t.column("manager_name", .text)
+                t.column("shipping_route", .text)
             }
 
+            // Órdenes (modelo local; se sube como OrderCreate).
             try db.create(table: "orders") { t in
                 t.primaryKey("client_uuid", .text)   // UUID v4 local; idempotencia
-                t.column("client_id", .text).notNull()
+                t.column("client_code", .text).notNull()
                     .references("clients", onDelete: .restrict)
                 t.column("status", .text).notNull()
+                t.column("notes", .text)
                 t.column("created_at", .datetime).notNull()
-                t.column("confirmed_at", .datetime)
+                t.column("taken_at", .datetime)
                 t.column("synced_at", .datetime)
+                t.column("order_number", .text)
             }
 
             try db.create(table: "order_lines") { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("order_uuid", .text).notNull()
                     .references("orders", column: "client_uuid", onDelete: .cascade)
-                t.column("item_id", .text).notNull()
-                t.column("quantity", .integer).notNull()
-                t.column("line_discount", .double).notNull().defaults(to: 0)
+                t.column("item_code", .text).notNull()
+                t.column("quantity", .double).notNull()
+                t.column("unit_price", .double).notNull()
+                t.column("line_discount_pct", .double).notNull().defaults(to: 0)
+                t.column("price_list", .text)
             }
 
+            // Marca de agua por recurso (server_time de la última bajada).
             try db.create(table: "sync_state") { t in
                 t.primaryKey("resource", .text)      // "catalog" | "clients"
                 t.column("last_synced_at", .datetime)

@@ -14,6 +14,7 @@ final class AuthSession: ObservableObject {
 
     @Published private(set) var state: State = .unknown
     @Published private(set) var isAuthenticating = false
+    @Published private(set) var displayName: String?
     @Published var errorMessage: String?
 
     private let api: AuthAPI
@@ -41,8 +42,9 @@ final class AuthSession: ObservableObject {
         defer { isAuthenticating = false }
 
         do {
-            let token = try await api.login(username: username, password: password)
-            try store.save(token)
+            let response = try await api.login(username: username, password: password)
+            try store.save(response.token)
+            displayName = response.displayName
             state = .signedIn
         } catch APIError.unauthorized {
             errorMessage = "Usuario o contraseña incorrectos."
@@ -56,6 +58,7 @@ final class AuthSession: ObservableObject {
     /// Cierra sesión: borra el token y vuelve a `signedOut`.
     func logout() {
         try? store.clear()
+        displayName = nil
         state = .signedOut
     }
 }

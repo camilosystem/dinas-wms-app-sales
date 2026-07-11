@@ -3,8 +3,16 @@ import XCTest
 
 /// Stub de la API de auth: no toca la red.
 private struct StubAuthAPI: AuthAPI {
-    var result: Result<String, Error>
-    func login(username: String, password: String) async throws -> String {
+    var result: Result<LoginResponse, Error>
+
+    init(result: Result<LoginResponse, Error>) { self.result = result }
+
+    /// Atajo: éxito con solo el token.
+    init(token: String) {
+        self.result = .success(LoginResponse(token: token, salespersonCode: nil, displayName: nil))
+    }
+
+    func login(username: String, password: String) async throws -> LoginResponse {
         try result.get()
     }
 }
@@ -13,14 +21,14 @@ private struct StubAuthAPI: AuthAPI {
 final class AuthSessionTests: XCTestCase {
 
     func test_restore_sinToken_quedaSignedOut() {
-        let session = AuthSession(api: StubAuthAPI(result: .success("t")),
+        let session = AuthSession(api: StubAuthAPI(token: "t"),
                                   store: InMemoryTokenStore())
         session.restore()
         XCTAssertEqual(session.state, .signedOut)
     }
 
     func test_restore_conToken_quedaSignedIn() {
-        let session = AuthSession(api: StubAuthAPI(result: .success("t")),
+        let session = AuthSession(api: StubAuthAPI(token: "t"),
                                   store: InMemoryTokenStore(token: "jwt-guardado"))
         session.restore()
         XCTAssertEqual(session.state, .signedIn)
@@ -28,7 +36,7 @@ final class AuthSessionTests: XCTestCase {
 
     func test_login_exitoso_guardaTokenYSignedIn() async throws {
         let store = InMemoryTokenStore()
-        let session = AuthSession(api: StubAuthAPI(result: .success("jwt-123")), store: store)
+        let session = AuthSession(api: StubAuthAPI(token: "jwt-123"), store: store)
 
         await session.login(username: "vendedor", password: "secreta")
 
@@ -52,7 +60,7 @@ final class AuthSessionTests: XCTestCase {
 
     func test_logout_borraTokenYSignedOut() async {
         let store = InMemoryTokenStore(token: "jwt-previo")
-        let session = AuthSession(api: StubAuthAPI(result: .success("x")), store: store)
+        let session = AuthSession(api: StubAuthAPI(token: "x"), store: store)
         session.restore()
         XCTAssertEqual(session.state, .signedIn)
 
