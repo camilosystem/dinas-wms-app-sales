@@ -2,6 +2,7 @@
 // Cada ambiente incluye este archivo y sobreescribe lo que cambia.
 
 APP_DISPLAY_NAME = Dinas Vendedores
+PRODUCT_BUNDLE_IDENTIFIER = com.dinas.sales
 
 // Firma. Poner el Team ID de Apple (10 caracteres) para archivar/distribuir por JAMF.
 // Vacío está bien para compilar a simulador; requerido para build de dispositivo.

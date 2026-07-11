@@ -2,6 +2,7 @@
 
 // Ambiente de DESARROLLO (build Debug).
 APP_DISPLAY_NAME = Dinas (Dev)
+PRODUCT_BUNDLE_IDENTIFIER = com.dinas.sales.dev
 
 // ⚠️ PLACEHOLDER — reemplazar por la URL real del middleware de dev (incluye /v1).
 MIDDLEWARE_BASE_URL = https:/$()/dev.api.dinas-wms.example.com/v1

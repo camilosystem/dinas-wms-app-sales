@@ -30,15 +30,16 @@ El build de **dispositivo requiere firma**: sin certificado/perfil válidos, fal
 
 ## Ambientes
 
-| Build config | Ambiente | URL (`MIDDLEWARE_BASE_URL`) | Nombre |
-|---|---|---|---|
-| Debug   | Dev     | `Config/Dev.xcconfig`     | Dinas (Dev) |
-| Staging | Staging | `Config/Staging.xcconfig` | Dinas (Staging) |
-| Release | Prod    | `Config/Prod.xcconfig`    | Dinas Vendedores |
+| Build config | Ambiente | URL (`MIDDLEWARE_BASE_URL`) | Nombre | Bundle ID |
+|---|---|---|---|---|
+| Debug   | Dev     | `Config/Dev.xcconfig`     | Dinas (Dev)     | `com.dinas.sales.dev` |
+| Staging | Staging | `Config/Staging.xcconfig` | Dinas (Staging) | `com.dinas.sales.staging` |
+| Release | Prod    | `Config/Prod.xcconfig`    | Dinas Vendedores | `com.dinas.sales` |
 
 > ⚠️ Las URLs son **placeholders** (`*.example.com`). Reemplazar por las reales antes de distribuir.
-> Para instalar Dev/Staging/Prod en paralelo en un mismo dispositivo harían falta bundle IDs distintos
-> (hoy los tres usan `com.dinas.sales`).
+> Cada ambiente usa su propio **bundle ID**, así que Dev/Staging/Prod se pueden instalar en paralelo
+> en un mismo dispositivo. `Config/ExportOptions.plist` mapea el perfil de **prod** (`com.dinas.sales`);
+> para archivar Staging/Dev, agrega su bundle ID y perfil in-house correspondiente en `provisioningProfiles`.
 
 ## Regenerar el proyecto Xcode
 

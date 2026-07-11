@@ -83,7 +83,7 @@ app.frameworks_build_phase.files << grdb_build_file
 
 app.build_configurations.each do |config|
   s = config.build_settings
-  s['PRODUCT_BUNDLE_IDENTIFIER'] = BUNDLE_ID
+  # PRODUCT_BUNDLE_IDENTIFIER llega del .xcconfig (varía por ambiente).
   s['PRODUCT_NAME'] = '$(TARGET_NAME)'
   s['MARKETING_VERSION'] = '0.1.0'
   s['CURRENT_PROJECT_VERSION'] = '1'

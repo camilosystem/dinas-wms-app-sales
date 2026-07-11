@@ -15,6 +15,7 @@ struct DinasSalesApp: App {
         WindowGroup {
             AuthGate()
                 .environmentObject(environment)
+                .environmentObject(environment.network)
         }
     }
 }
