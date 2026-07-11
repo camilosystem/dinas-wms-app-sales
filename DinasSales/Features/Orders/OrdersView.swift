@@ -9,6 +9,7 @@ struct OrdersView: View {
     @State private var path: [OrderRoute] = []
     @State private var showClientPicker = false
     @State private var loadError = false
+    @State private var draftToDelete: OrderSummary?
 
     private var ordersRepo: OrdersRepository { OrdersRepository(database: environment.database) }
     private var clientsRepo: ClientsRepository { ClientsRepository(database: environment.database) }
@@ -56,10 +57,35 @@ struct OrdersView: View {
     }
 
     private var list: some View {
-        List(summaries) { summary in
-            NavigationLink(value: route(for: summary.order)) {
-                OrderRow(summary: summary)
+        List {
+            ForEach(summaries) { summary in
+                NavigationLink(value: route(for: summary.order)) {
+                    OrderRow(summary: summary)
+                }
+                .swipeActions(edge: .trailing) {
+                    // Solo los borradores se pueden descartar; confirmadas/sincronizadas
+                    // son registros que no se borran desde la app.
+                    if summary.order.status == .draft {
+                        Button(role: .destructive) {
+                            draftToDelete = summary
+                        } label: {
+                            Label("Descartar", systemImage: "trash")
+                        }
+                    }
+                }
             }
+        }
+        .confirmationDialog(
+            "¿Descartar este borrador?",
+            isPresented: Binding(get: { draftToDelete != nil },
+                                 set: { if !$0 { draftToDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: draftToDelete
+        ) { summary in
+            Button("Descartar borrador", role: .destructive) { deleteDraft(summary) }
+            Button("Cancelar", role: .cancel) { draftToDelete = nil }
+        } message: { _ in
+            Text("Se eliminará la orden y sus líneas. Esta acción no se puede deshacer.")
         }
     }
 
@@ -98,6 +124,16 @@ struct OrdersView: View {
             loadError = true
             showClientPicker = false
         }
+    }
+
+    private func deleteDraft(_ summary: OrderSummary) {
+        do {
+            try ordersRepo.deleteDraft(orderUUID: summary.order.clientUUID)
+        } catch {
+            loadError = true
+        }
+        draftToDelete = nil
+        reload()
     }
 
     private func reload() {

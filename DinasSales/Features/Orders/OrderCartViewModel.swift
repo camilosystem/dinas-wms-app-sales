@@ -62,6 +62,17 @@ final class OrderCartViewModel: ObservableObject {
         write { try orders.setDiscount(orderUUID: order.clientUUID, itemCode: itemCode, percent: percent) }
     }
 
+    /// Descarta el borrador (y sus líneas). Devuelve `true` si se eliminó.
+    func discard() -> Bool {
+        do {
+            try orders.deleteDraft(orderUUID: order.clientUUID)
+            return true
+        } catch {
+            errorMessage = "No se pudo descartar el borrador."
+            return false
+        }
+    }
+
     /// Confirma la orden. Devuelve `true` si pasó a confirmada.
     func confirm() -> Bool {
         do {

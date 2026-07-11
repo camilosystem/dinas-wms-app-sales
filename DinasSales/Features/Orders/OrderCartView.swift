@@ -9,6 +9,7 @@ struct OrderCartView: View {
     let onFinish: () -> Void
 
     @State private var showItemPicker = false
+    @State private var showDiscardConfirm = false
 
     init(order: Order, clientName: String, database: AppDatabase, onFinish: @escaping () -> Void) {
         _viewModel = StateObject(wrappedValue: OrderCartViewModel(
@@ -50,9 +51,27 @@ struct OrderCartView: View {
                     Text(MoneyFormat.string(viewModel.total)).font(.headline)
                 }
             }
+
+            Section {
+                Button(role: .destructive) {
+                    showDiscardConfirm = true
+                } label: {
+                    Label("Descartar borrador", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+            }
         }
         .navigationTitle("Orden")
         .navigationBarTitleDisplayModeInlineCompat()
+        .confirmationDialog("¿Descartar este borrador?", isPresented: $showDiscardConfirm,
+                            titleVisibility: .visible) {
+            Button("Descartar borrador", role: .destructive) {
+                if viewModel.discard() { onFinish() }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Se eliminará la orden y sus líneas. Esta acción no se puede deshacer.")
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

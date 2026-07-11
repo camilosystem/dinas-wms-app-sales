@@ -137,6 +137,25 @@ final class OrdersRepositoryTests: XCTestCase {
         }
     }
 
+    func test_deleteDraft_eliminaBorradorYSusLineasEnCascada() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I2", quantity: 1)
+
+        try repo.deleteDraft(orderUUID: order.clientUUID)
+
+        XCTAssertNil(try repo.order(uuid: order.clientUUID), "la orden se eliminó")
+        try db.dbQueue.read { db in
+            let lineCount = try OrderLine
+                .filter(Column("order_uuid") == order.clientUUID).fetchCount(db)
+            XCTAssertEqual(lineCount, 0, "las líneas se eliminaron en cascada")
+        }
+        XCTAssertTrue(try repo.summaries().isEmpty)
+    }
+
     // MARK: - Regla de precio (cero es decisión; null es ausencia)
 
     /// Inserta un ítem con `price` explícito (posible cero o nil).
