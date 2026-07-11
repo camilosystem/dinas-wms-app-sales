@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+# Un solo run por rama/PR: cancela el anterior si llega un push nuevo.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: swift test (host macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      # Cachea el build de SPM (incluye GRDB resuelto) según Package.resolved.
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Run tests
+        run: swift test
+
+  build-ios:
+    name: build app (iOS Simulator)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: xcodebuild -version
+
+      # Compila el target de app usando el .xcodeproj versionado (GRDB vía SPM).
+      # Simulador → sin firma. Solo verifica que la app compila.
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild build \
+            -project DinasSales.xcodeproj \
+            -scheme DinasSales \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -quiet \
+            CODE_SIGNING_ALLOWED=NO

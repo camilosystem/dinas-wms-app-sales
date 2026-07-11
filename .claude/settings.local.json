@@ -48,7 +48,8 @@
       "Bash(git commit -q -m 'feat\\(ux\\): banner offline global + bundle IDs por ambiente *)",
       "Bash(git commit -q -m 'test\\(sync\\): idempotencia end-to-end \\(respuesta perdida + crash\\) *)",
       "Bash(git commit -q -m 'feat\\(sync\\): guard anti-concurrencia atomico en sync/syncDown *)",
-      "Bash(git commit -q -m 'fix\\(orders\\): regla de precio \\(cero valido, null no ordenable\\) + USD fijo *)"
+      "Bash(git commit -q -m 'fix\\(orders\\): regla de precio \\(cero valido, null no ordenable\\) + USD fijo *)",
+      "Bash(git commit -q -m 'ci: GitHub Actions \\(swift test + build iOS\\) en PRs y main *)"
     ]
   }
 }
