@@ -28,6 +28,24 @@ project = Xcodeproj::Project.new(PROJECT_PATH)
 # Grupos que apuntan a las carpetas reales.
 app_group = project.new_group('DinasSales', 'DinasSales')
 tests_group = project.new_group('DinasSalesTests', 'DinasSalesTests')
+config_group = project.new_group('Config', 'Config')
+
+# xcconfig por ambiente. Debug->Dev, Staging->Staging, Release->Prod.
+config_group.new_file(File.join(ROOT, 'Config', 'Base.xcconfig'))
+xcconfig_ref = {
+  'Debug'   => config_group.new_file(File.join(ROOT, 'Config', 'Dev.xcconfig')),
+  'Staging' => config_group.new_file(File.join(ROOT, 'Config', 'Staging.xcconfig')),
+  'Release' => config_group.new_file(File.join(ROOT, 'Config', 'Prod.xcconfig'))
+}
+
+# Añade una configuración 'Staging' (clon de Release) a project + targets.
+def add_staging(obj, project)
+  release = obj.build_configuration_list['Release']
+  staging = project.new(Xcodeproj::Project::Object::XCBuildConfiguration)
+  staging.name = 'Staging'
+  staging.build_settings = release.build_settings.dup
+  obj.build_configuration_list.build_configurations << staging
+end
 
 # --- Paquete SPM: GRDB --------------------------------------------------------
 
@@ -73,7 +91,15 @@ app.build_configurations.each do |config|
   s['DEVELOPMENT_LANGUAGE'] = 'es'
   s['CODE_SIGN_STYLE'] = 'Automatic'
   s['ENABLE_PREVIEWS'] = 'YES'
-  s['MIDDLEWARE_BASE_URL'] = ''                # configurar por entorno (ver AppConfig)
+  # MIDDLEWARE_BASE_URL y APP_DISPLAY_NAME llegan desde el .xcconfig del ambiente.
+end
+
+# Staging para project + app, y enlace de cada configuración a su .xcconfig.
+add_staging(project, project)
+add_staging(app, project)
+app.build_configurations.each do |config|
+  ref = xcconfig_ref[config.name]
+  config.base_configuration_reference = ref if ref
 end
 
 # --- Target de tests ----------------------------------------------------------
@@ -92,6 +118,7 @@ tests.build_configurations.each do |config|
   s['TEST_HOST'] = '$(BUILT_PRODUCTS_DIR)/DinasSales.app/DinasSales'
   s['BUNDLE_LOADER'] = '$(TEST_HOST)'
 end
+add_staging(tests, project)
 
 # --- Esquema ------------------------------------------------------------------
 

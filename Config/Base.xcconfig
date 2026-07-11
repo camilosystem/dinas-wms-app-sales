@@ -1,0 +1,9 @@
+// Configuración común a todos los ambientes.
+// Cada ambiente incluye este archivo y sobreescribe lo que cambia.
+
+APP_DISPLAY_NAME = Dinas Vendedores
+
+// Nota xcconfig: "//" inicia un comentario en CUALQUIER punto de la línea, así que
+// un https://... rompería el valor. El truco $(...) vacío separa las barras:
+//   https:/$()/host   =>   https://host
+MIDDLEWARE_BASE_URL =

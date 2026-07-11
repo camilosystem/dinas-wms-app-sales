@@ -1,0 +1,7 @@
+#include "Base.xcconfig"
+
+// Ambiente de PRODUCCIÓN (build Release).
+APP_DISPLAY_NAME = Dinas Vendedores
+
+// ⚠️ PLACEHOLDER — confirmar la URL real de producción (el contrato usa este host).
+MIDDLEWARE_BASE_URL = https:/$()/api.dinas-wms.example.com/v1

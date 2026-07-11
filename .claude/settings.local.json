@@ -34,7 +34,9 @@
       "Bash(gem install *)",
       "Bash(ruby Scripts/generate_project.rb)",
       "Bash(xcodebuild -list -project DinasSales.xcodeproj)",
-      "Bash(xcodebuild build *)"
+      "Bash(xcodebuild build *)",
+      "Bash(git commit -q -m 'build: target de app iOS \\(.xcodeproj\\) universal con GRDB \\(SPM\\) *)",
+      "Bash(git commit -q -m 'build: configuracion por ambiente \\(dev/staging/prod\\) via xcconfig *)"
     ]
   }
 }
