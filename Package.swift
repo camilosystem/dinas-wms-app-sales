@@ -29,6 +29,7 @@ let package = Package(
             // Recursos que pertenecen al target de app iOS (.xcodeproj), no al paquete SPM.
             exclude: [
                 "Resources/Info.plist",
+                "Resources/Info-Dev.plist",
                 "Resources/Assets.xcassets"
             ]
         ),

@@ -4,6 +4,10 @@
 APP_DISPLAY_NAME = Dinas Vendedores
 PRODUCT_BUNDLE_IDENTIFIER = com.dinas.sales
 
+// Info.plist por defecto (Prod/Staging): SIN excepción ATS → exige HTTPS.
+// Dev lo sobreescribe con Info-Dev.plist (permite HTTP a red local).
+INFOPLIST_FILE = DinasSales/Resources/Info.plist
+
 // Firma. Poner el Team ID de Apple (10 caracteres) para archivar/distribuir por JAMF.
 // Vacío está bien para compilar a simulador; requerido para build de dispositivo.
 DEVELOPMENT_TEAM =

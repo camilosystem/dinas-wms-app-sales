@@ -57,7 +57,13 @@
       "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/ci.yml'\\); puts 'YAML OK'\")",
       "Bash(tee /tmp/strict.log)",
       "Read(//tmp/**)",
-      "Bash(git commit -q -m 'ci: gate de strict concurrency + arreglo de 6 warnings reales *)"
+      "Bash(git commit -q -m 'ci: gate de strict concurrency + arreglo de 6 warnings reales *)",
+      "Bash(curl -i -s --max-time 10 http://192.168.1.33:5257/v1/sync/catalog)",
+      "Bash(echo \"curl exit: $?\")",
+      "Bash(curl -s -o /dev/null -w 'status: %{http_code}\\\\n' --max-time 10 -X POST http://192.168.1.33:5257/v1/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"__probe__\",\"password\":\"__wrong__\"}')",
+      "Bash(xcrun simctl *)",
+      "Bash(git commit -q -m 'config\\(dev\\): apuntar Dev al middleware local + excepcion ATS solo en Dev *)",
+      "Bash(open -a Simulator)"
     ]
   }
 }

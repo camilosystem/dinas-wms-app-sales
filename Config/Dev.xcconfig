@@ -4,5 +4,9 @@
 APP_DISPLAY_NAME = Dinas (Dev)
 PRODUCT_BUNDLE_IDENTIFIER = com.dinas.sales.dev
 
-// ⚠️ PLACEHOLDER — reemplazar por la URL real del middleware de dev (incluye /v1).
-MIDDLEWARE_BASE_URL = https:/$()/dev.api.dinas-wms.example.com/v1
+// Info.plist con excepción ATS (permite HTTP a red local). Solo Dev.
+INFOPLIST_FILE = DinasSales/Resources/Info-Dev.plist
+
+// Middleware local (.NET/Kestrel) en la red de la Mac. HTTP → requiere el Info-Dev.plist.
+// El truco /$()/ evita que el // del esquema se lea como comentario en xcconfig.
+MIDDLEWARE_BASE_URL = http:/$()/192.168.1.33:5257/v1
