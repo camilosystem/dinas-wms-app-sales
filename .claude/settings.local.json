@@ -24,7 +24,17 @@
       "Bash(git commit -q -m 'feat\\(orders\\): UI de toma de orden \\(carrito, descuento, borrador/confirmar\\) *)",
       "Bash(perl -0pi -e 's/StubSyncDownAPI\\\\\\(/StubSyncAPI\\(/g' DinasSalesTests/SyncEngineTests.swift)",
       "Bash(perl -0pi -e 's/let order = try db\\\\.dbQueue\\\\.read \\\\{ try Order\\\\.fetchOne\\\\\\(\\\\$0, key: \"ORD-1\"\\\\\\) \\\\}/let order = try await db.dbQueue.read { try Order.fetchOne\\($0, key: \"ORD-1\"\\) }/g' DinasSalesTests/SyncEngineTests.swift)",
-      "Bash(git commit -q -m 'feat\\(sync\\): subida de ordenes confirmadas \\(POST /orders idempotente\\) *)"
+      "Bash(git commit -q -m 'feat\\(sync\\): subida de ordenes confirmadas \\(POST /orders idempotente\\) *)",
+      "Bash(xcodegen --version)",
+      "Bash(xcodebuild -version)",
+      "Bash(xcrun --sdk iphonesimulator --show-sdk-version)",
+      "Bash(ruby -v)",
+      "Bash(gem list *)",
+      "Bash(ruby -e \"require 'xcodeproj'; puts 'xcodeproj OK'\")",
+      "Bash(gem install *)",
+      "Bash(ruby Scripts/generate_project.rb)",
+      "Bash(xcodebuild -list -project DinasSales.xcodeproj)",
+      "Bash(xcodebuild build *)"
     ]
   }
 }

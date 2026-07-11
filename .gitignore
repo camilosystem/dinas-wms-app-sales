@@ -16,6 +16,9 @@ xcuserdata/
 *.xcscmblueprint
 *.xccheckout
 
+## SPM package graph resuelto dentro del .xcodeproj (se regenera al abrir)
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
 ## Xcode project cruft
 *.moved-aside
 *.pbxuser
