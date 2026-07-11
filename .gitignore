@@ -30,7 +30,7 @@ xcuserdata/
 # Swift Package Manager
 .build/
 .swiftpm/
-Package.resolved
+# Package.resolved SÍ se versiona (fija la versión exacta de las dependencias).
 
 # CocoaPods (por si acaso)
 Pods/

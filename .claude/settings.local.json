@@ -7,7 +7,11 @@
       "Bash(git config *)",
       "Bash(git add *)",
       "Bash(git commit -q -m 'chore: commit inicial — CLAUDE.md, .gitignore y config del agente *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(git commit -q -m 'feat: esqueleto de la App de Vendedores \\(SPM + GRDB\\) *)",
+      "Bash(timeout 240 swift build)",
+      "Bash(swift build *)",
+      "Bash(swift test *)"
     ]
   }
 }

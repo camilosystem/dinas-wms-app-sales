@@ -91,7 +91,7 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
 
 /// Línea de una orden: ítem, cantidad y descuento de línea.
 /// (El descuento global está fuera del MVP.)
-struct OrderLine: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
+struct OrderLine: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, Equatable {
     var id: Int64?              // autoincrement local
     var orderUUID: String      // FK -> orders.client_uuid
     var itemID: String

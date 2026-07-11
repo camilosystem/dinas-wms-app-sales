@@ -7,7 +7,10 @@ import PackageDescription
 let package = Package(
     name: "DinasSales",
     platforms: [
-        .iOS(.v16)
+        .iOS(.v16),
+        // macOS solo habilita compilar/testear el paquete en el host (CI, `swift test`).
+        // El objetivo real de distribución es iOS (iPad + iPhone).
+        .macOS(.v13)
     ],
     products: [
         .library(name: "DinasSales", targets: ["DinasSales"])
