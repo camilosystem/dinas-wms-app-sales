@@ -19,7 +19,8 @@
       "Bash(perl -0pi -e 's/try db\\\\.dbQueue\\\\.read \\\\{ db in/try await db.dbQueue.read { db in/g' DinasSalesTests/SyncEngineTests.swift)",
       "Bash(git commit -q -m 'refactor: alinear modelos, DTOs y auth con openapi.yaml *)",
       "Bash(git commit -q -m 'feat\\(catalog\\): grilla, busqueda local offline y detalle + sync en Home *)",
-      "Bash(git commit -q -m 'feat\\(clients\\): lista de clientes asignados, busqueda local y detalle *)"
+      "Bash(git commit -q -m 'feat\\(clients\\): lista de clientes asignados, busqueda local y detalle *)",
+      "Bash(git commit -q -m 'feat\\(orders\\): repositorio de toma de orden \\(cliente primero\\) *)"
     ]
   }
 }
