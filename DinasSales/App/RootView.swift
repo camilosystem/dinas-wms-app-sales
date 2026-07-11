@@ -22,6 +22,8 @@ struct RootView: View {
 
 /// Home mínimo. El dashboard completo está fuera del MVP.
 struct HomeView: View {
+    @EnvironmentObject private var environment: AppEnvironment
+
     var body: some View {
         NavigationStack {
             ContentUnavailableViewCompat(
@@ -29,6 +31,11 @@ struct HomeView: View {
                 message: "Sincroniza para trabajar sin conexión."
             )
             .navigationTitle("Home")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Cerrar sesión") { environment.auth.logout() }
+                }
+            }
         }
     }
 }

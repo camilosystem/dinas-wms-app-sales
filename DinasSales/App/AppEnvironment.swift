@@ -12,6 +12,7 @@ final class AppEnvironment: ObservableObject {
     let database: AppDatabase
     let api: APIClient
     let sync: SyncEngine
+    let auth: AuthSession
 
     init() {
         // Base local en el contenedor de la app. Si falla la apertura, es un error
@@ -21,7 +22,8 @@ final class AppEnvironment: ObservableObject {
         } catch {
             fatalError("No se pudo abrir la base local: \(error)")
         }
-        self.api = APIClient()
+        self.api = APIClient(baseURL: AppConfig.middlewareBaseURL)
         self.sync = SyncEngine(database: database, api: api)
+        self.auth = AuthSession(api: api, store: KeychainTokenStore())
     }
 }

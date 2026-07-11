@@ -13,7 +13,7 @@ struct DinasSalesApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            AuthGate()
                 .environmentObject(environment)
         }
     }

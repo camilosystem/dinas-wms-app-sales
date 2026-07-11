@@ -1,12 +1,19 @@
 import Foundation
 
+/// Superficie de autenticación del middleware. Se extrae como protocolo para poder
+/// inyectar un stub en tests sin tocar la red.
+protocol AuthAPI {
+    /// `POST /auth/login` — devuelve el JWT. Lanza `APIError.unauthorized` en 401.
+    func login(username: String, password: String) async throws -> String
+}
+
 /// Cliente HTTP contra el middleware, según `dinas-wms-contracts/openapi.yaml`.
 ///
-/// Esqueleto: define la superficie mínima del MVP. La implementación real de cada
-/// endpoint se completa contra el contrato OpenAPI. Si falta un campo/endpoint en el
-/// contrato, no se inventa: se eleva al Arquitecto.
-struct APIClient {
-    /// URL base del middleware. Se configura por entorno (build settings / plist).
+/// Esqueleto: `login` ya está implementado; el resto de endpoints se completan contra
+/// el contrato OpenAPI. Si falta un campo/endpoint en el contrato, no se inventa: se
+/// eleva al Arquitecto.
+struct APIClient: AuthAPI {
+    /// URL base del middleware. Se configura por entorno (ver `AppConfig`).
     var baseURL: URL?
     var session: URLSession
 
@@ -19,7 +26,28 @@ struct APIClient {
 
     /// `POST /auth/login` — devuelve el JWT que se guarda en Keychain.
     func login(username: String, password: String) async throws -> String {
-        throw APIError.notImplemented
+        guard let baseURL else { throw APIError.missingBaseURL }
+
+        var request = URLRequest(url: baseURL.appendingPathComponent("auth/login"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(
+            LoginRequest(username: username, password: password)
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.server(status: -1)
+        }
+        switch http.statusCode {
+        case 200..<300:
+            return try JSONDecoder().decode(LoginResponse.self, from: data).token
+        case 401:
+            throw APIError.unauthorized
+        default:
+            throw APIError.server(status: http.statusCode)
+        }
     }
 
     // MARK: - Sync bajada
@@ -43,7 +71,7 @@ struct APIClient {
     }
 }
 
-enum APIError: Error {
+enum APIError: Error, Equatable {
     case notImplemented
     case missingBaseURL
     case unauthorized
