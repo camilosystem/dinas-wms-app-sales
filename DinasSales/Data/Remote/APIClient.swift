@@ -1,20 +1,23 @@
 import Foundation
 import os
 
+// Los clientes de red se invocan con `await` desde el @MainActor y corren en el ejecutor
+// genérico: deben ser `Sendable` para cruzar ese límite sin riesgo de carrera.
+
 /// Superficie de autenticación (login público, sin token).
-protocol AuthAPI {
+protocol AuthAPI: Sendable {
     /// `POST /auth/login`. Lanza `APIError.unauthorized` en 401.
     func login(username: String, password: String) async throws -> LoginResponse
 }
 
 /// Superficie de sincronización de bajada (requiere token).
-protocol SyncDownAPI {
+protocol SyncDownAPI: Sendable {
     func fetchCatalog(since: Date?) async throws -> CatalogPage
     func fetchClients(since: Date?) async throws -> ClientsPage
 }
 
 /// Superficie de sincronización de subida (requiere token).
-protocol SyncUpAPI {
+protocol SyncUpAPI: Sendable {
     /// `POST /orders`. Idempotente por `client_uuid`.
     func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO
 }
@@ -29,11 +32,11 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
     var baseURL: URL?
     var session: URLSession
     /// Provee el JWT actual (desde Keychain). `nil` cuando no hay sesión.
-    var tokenProvider: () -> String?
+    var tokenProvider: @Sendable () -> String?
 
     init(baseURL: URL? = nil,
          session: URLSession = .shared,
-         tokenProvider: @escaping () -> String? = { nil }) {
+         tokenProvider: @escaping @Sendable () -> String? = { nil }) {
         self.baseURL = baseURL
         self.session = session
         self.tokenProvider = tokenProvider
@@ -79,7 +82,7 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
 
     private func sinceQuery(_ since: Date?) -> [URLQueryItem] {
         guard let since else { return [] }
-        return [URLQueryItem(name: "since", value: iso8601.string(from: since))]
+        return [URLQueryItem(name: "since", value: JSONCoding.iso8601String(since))]
     }
 
     private func makeRequest(path: String,
@@ -126,12 +129,6 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
             throw APIError.server(status: http.statusCode)
         }
     }
-
-    private let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
 }
 
 enum APIError: Error, Equatable {

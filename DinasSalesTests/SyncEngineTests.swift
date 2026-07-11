@@ -3,8 +3,9 @@ import GRDB
 @testable import DinasSales
 
 /// Stub de sincronización: devuelve páginas fijas, registra el `since` recibido y
-/// captura las órdenes subidas.
-private final class StubSyncAPI: SyncDownAPI, SyncUpAPI {
+/// captura las órdenes subidas. Uso secuencial en tests (con `await` entre accesos):
+/// `@unchecked Sendable` es seguro aquí.
+private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
     var catalog: CatalogPage
     var clients: ClientsPage
     private(set) var lastCatalogSince: Date??
@@ -45,7 +46,7 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI {
 
 /// Servidor simulado que deduplica por `client_uuid` (idempotencia REAL del lado
 /// servidor). Puede "perder" la respuesta de una petición que sí procesó.
-private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI {
+private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
     /// UUIDs que el servidor persistió (con repetidos si hubiera un bug de dedup).
     private(set) var receivedOrderIDs: [String] = []
     private var orderNumbers: [String: String] = [:]

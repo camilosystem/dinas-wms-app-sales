@@ -52,7 +52,12 @@
       "Bash(git commit -q -m 'ci: GitHub Actions \\(swift test + build iOS\\) en PRs y main *)",
       "Bash(git commit -q -m 'feat\\(sync\\): ultima sincronizacion en Home + deshabilitar sync offline *)",
       "Bash(git commit -q -m 'docs: README del repo \\(arquitectura, como correr, ambientes, reglas\\) *)",
-      "Bash(git commit -q -m 'docs: disciplina de migraciones \\(comentario en el migrador + MIGRATIONS.md\\) *)"
+      "Bash(git commit -q -m 'docs: disciplina de migraciones \\(comentario en el migrador + MIGRATIONS.md\\) *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/ci.yml'\\); puts 'YAML OK'\")",
+      "Bash(tee /tmp/strict.log)",
+      "Read(//tmp/**)",
+      "Bash(git commit -q -m 'ci: gate de strict concurrency + arreglo de 6 warnings reales *)"
     ]
   }
 }

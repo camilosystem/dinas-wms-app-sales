@@ -29,15 +29,24 @@ enum JSONCoding {
         return encoder
     }()
 
-    private static let iso8601WithFraction: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
+    /// Formatea/parsea una fecha en ISO-8601 con la zona por defecto (formato del contrato).
+    static func iso8601String(_ date: Date) -> String {
+        iso8601WithFraction.string(from: date)
+    }
 
-    private static let iso8601Plain: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
+    /// `ISO8601DateFormatter`, una vez configurado, es seguro para uso concurrente de
+    /// solo-lectura (`date(from:)` / `string(from:)`). Se envuelve para declararlo Sendable.
+    private struct ISO8601: @unchecked Sendable {
+        private let formatter: ISO8601DateFormatter
+        init(_ options: ISO8601DateFormatter.Options) {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = options
+            formatter = f
+        }
+        func date(from string: String) -> Date? { formatter.date(from: string) }
+        func string(from date: Date) -> String { formatter.string(from: date) }
+    }
+
+    private static let iso8601WithFraction = ISO8601([.withInternetDateTime, .withFractionalSeconds])
+    private static let iso8601Plain = ISO8601([.withInternetDateTime])
 }

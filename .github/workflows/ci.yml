@@ -32,6 +32,24 @@ jobs:
       - name: Run tests
         run: swift test
 
+  strict-concurrency:
+    name: strict concurrency (nuestro código)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compila con chequeo completo de concurrencia y FALLA si hay warnings en
+      # nuestro código (los de GRDB, en otra ruta, no cuentan). Red de seguridad
+      # contra data races antes de migrar a Swift 6.
+      - name: Build con -strict-concurrency=complete
+        run: |
+          set -o pipefail
+          swift build --build-tests -Xswiftc -strict-concurrency=complete 2>&1 | tee strict.log
+          if grep -E '/(DinasSales|DinasSalesTests)/.*\.swift.*warning:' strict.log; then
+            echo "::error::Warnings de concurrencia en el código de la app (arriba)."
+            exit 1
+          fi
+
   build-ios:
     name: build app (iOS Simulator)
     runs-on: macos-14

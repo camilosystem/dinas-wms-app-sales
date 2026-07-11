@@ -117,6 +117,9 @@ Cada build configuration apunta a su `Config/*.xcconfig`:
 
 - `swift test` (host macOS) — protege los 41 tests.
 - `xcodebuild build` del target de app para iOS Simulator — verifica que compila.
+- **strict concurrency** — compila con `-strict-concurrency=complete` y falla si hay
+  warnings de concurrencia en nuestro código (red de seguridad hacia Swift 6). Correr local:
+  `swift build --build-tests -Xswiftc -strict-concurrency=complete`.
 
 ## Observabilidad
 

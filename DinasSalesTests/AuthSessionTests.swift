@@ -3,9 +3,9 @@ import XCTest
 
 /// Stub de la API de auth: no toca la red.
 private struct StubAuthAPI: AuthAPI {
-    var result: Result<LoginResponse, Error>
+    var result: Result<LoginResponse, APIError>
 
-    init(result: Result<LoginResponse, Error>) { self.result = result }
+    init(result: Result<LoginResponse, APIError>) { self.result = result }
 
     /// Atajo: éxito con solo el token.
     init(token: String) {
