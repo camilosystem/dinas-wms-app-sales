@@ -43,6 +43,38 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI {
     }
 }
 
+/// Servidor simulado que deduplica por `client_uuid` (idempotencia REAL del lado
+/// servidor). Puede "perder" la respuesta de una petición que sí procesó.
+private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI {
+    /// UUIDs que el servidor persistió (con repetidos si hubiera un bug de dedup).
+    private(set) var receivedOrderIDs: [String] = []
+    private var orderNumbers: [String: String] = [:]
+    /// Si es true, la próxima respuesta se pierde (el servidor SÍ procesó la orden).
+    var dropNextResponse = false
+
+    func fetchCatalog(since: Date?) async throws -> CatalogPage {
+        CatalogPage(items: [], serverTime: Date(timeIntervalSince1970: 0))
+    }
+    func fetchClients(since: Date?) async throws -> ClientsPage {
+        ClientsPage(clients: [], serverTime: Date(timeIntervalSince1970: 0))
+    }
+
+    func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO {
+        // Lado servidor: registrar (y numerar) solo si el UUID es nuevo.
+        if orderNumbers[order.clientUUID] == nil {
+            receivedOrderIDs.append(order.clientUUID)
+            orderNumbers[order.clientUUID] = "N-\(orderNumbers.count + 1)"
+        }
+        let number = orderNumbers[order.clientUUID]!
+        if dropNextResponse {
+            dropNextResponse = false
+            throw URLError(.networkConnectionLost)   // respuesta perdida tras procesar
+        }
+        return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: number,
+                                status: "SINCRONIZADA", receivedAt: nil)
+    }
+}
+
 @MainActor
 final class SyncEngineTests: XCTestCase {
 
@@ -183,6 +215,53 @@ final class SyncEngineTests: XCTestCase {
         let failed2 = try await engine.pushConfirmedOrders()
         XCTAssertEqual(failed2, 0)
         XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
+    }
+
+    // MARK: - Idempotencia end-to-end (servidor simulado)
+
+    /// Escenario A: el servidor procesa la orden, pero la respuesta se pierde. El
+    /// reintento usa el MISMO client_uuid y el servidor NO crea un duplicado.
+    func test_push_respuestaPerdida_reintentoNoDuplicaEnServidor() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let server = IdempotentServerStub()
+        server.dropNextResponse = true                 // la 1ª respuesta se pierde en la red
+        let engine = SyncEngine(database: db, api: server)
+
+        // 1er intento: el servidor la registra, pero el cliente no recibe respuesta.
+        let failed1 = try await engine.pushConfirmedOrders()
+        XCTAssertEqual(failed1, 1)
+        let after1 = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(after1?.status, .confirmed, "sigue pendiente → reintentará")
+
+        // 2º intento (reintento con el mismo UUID): el servidor responde sin duplicar.
+        let failed2 = try await engine.pushConfirmedOrders()
+        XCTAssertEqual(failed2, 0)
+        XCTAssertEqual(server.receivedOrderIDs, ["ORD-1"],
+                       "el servidor registró la orden UNA sola vez")
+        let after2 = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(after2?.status, .synced)
+        XCTAssertEqual(after2?.orderNumber, "N-1")
+    }
+
+    /// Escenario B: la app confirma la orden (persistida con su UUID) y se cierra antes
+    /// de recibir respuesta. Al reabrir, una instancia NUEVA del motor reintenta con el
+    /// mismo UUID persistido; no genera uno nuevo.
+    func test_push_trasCrash_reusaMismoUUIDPersistido() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")      // confirmada y persistida (pre-crash)
+
+        // "Reapertura": motor y servidor nuevos, misma base local.
+        let server = IdempotentServerStub()
+        let engine = SyncEngine(database: db, api: server)
+
+        let failed = try await engine.pushConfirmedOrders()
+
+        XCTAssertEqual(failed, 0)
+        XCTAssertEqual(server.receivedOrderIDs, ["ORD-1"],
+                       "reusa el UUID persistido, no genera uno nuevo")
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .synced)
     }
 
     // MARK: - 401 / sesión expirada
