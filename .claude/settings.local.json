@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git --version)",
+      "Bash(git init *)",
+      "Bash(git symbolic-ref *)",
+      "Bash(git config *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'chore: commit inicial — CLAUDE.md, .gitignore y config del agente *)",
+      "Bash(git checkout *)"
+    ]
+  }
+}
