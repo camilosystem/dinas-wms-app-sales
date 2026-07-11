@@ -2,14 +2,21 @@ import XCTest
 import GRDB
 @testable import DinasSales
 
-/// Stub de la bajada: devuelve páginas fijas y registra el `since` recibido.
-private final class StubSyncDownAPI: SyncDownAPI {
+/// Stub de sincronización: devuelve páginas fijas, registra el `since` recibido y
+/// captura las órdenes subidas.
+private final class StubSyncAPI: SyncDownAPI, SyncUpAPI {
     var catalog: CatalogPage
     var clients: ClientsPage
     private(set) var lastCatalogSince: Date??
     private(set) var lastClientsSince: Date??
 
-    init(catalog: CatalogPage, clients: ClientsPage) {
+    /// UUIDs de órdenes que recibió `postOrder` (para verificar reintentos).
+    private(set) var postedUUIDs: [String] = []
+    /// Si es no-nil, `postOrder` lanza ese error.
+    var postError: Error?
+
+    init(catalog: CatalogPage = CatalogPage(items: [], serverTime: Date(timeIntervalSince1970: 0)),
+         clients: ClientsPage = ClientsPage(clients: [], serverTime: Date(timeIntervalSince1970: 0))) {
         self.catalog = catalog
         self.clients = clients
     }
@@ -22,6 +29,13 @@ private final class StubSyncDownAPI: SyncDownAPI {
     func fetchClients(since: Date?) async throws -> ClientsPage {
         lastClientsSince = since
         return clients
+    }
+
+    func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO {
+        if let postError { throw postError }
+        postedUUIDs.append(order.clientUUID)
+        return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: "N-\(postedUUIDs.count)",
+                                status: "SINCRONIZADA", receivedAt: nil)
     }
 }
 
@@ -37,7 +51,7 @@ final class SyncEngineTests: XCTestCase {
     func test_pullCatalog_persisteItemsYGuardaMarcaDeAgua() async throws {
         let db = try AppDatabase.makeInMemory()
         let serverTime = Date(timeIntervalSince1970: 1_000)
-        let api = StubSyncDownAPI(
+        let api = StubSyncAPI(
             catalog: CatalogPage(items: [makeItem("A", available: 5),
                                          makeItem("B", available: 0)],
                                  serverTime: serverTime),
@@ -60,7 +74,7 @@ final class SyncEngineTests: XCTestCase {
     func test_pullCatalog_upsert_actualizaExistentesYReenviaSince() async throws {
         let db = try AppDatabase.makeInMemory()
         let t1 = Date(timeIntervalSince1970: 1_000)
-        let api = StubSyncDownAPI(
+        let api = StubSyncAPI(
             catalog: CatalogPage(items: [makeItem("A", available: 5)], serverTime: t1),
             clients: ClientsPage(clients: [], serverTime: t1)
         )
@@ -87,7 +101,7 @@ final class SyncEngineTests: XCTestCase {
         let cliente = Client(clientCode: "C1", name: "Tienda", address: "Calle 1",
                              city: "Ciudad", zipcode: "0000", managerName: "Ana",
                              shippingRoute: "R1")
-        let api = StubSyncDownAPI(
+        let api = StubSyncAPI(
             catalog: CatalogPage(items: [], serverTime: t),
             clients: ClientsPage(clients: [cliente], serverTime: t)
         )
@@ -99,5 +113,71 @@ final class SyncEngineTests: XCTestCase {
             XCTAssertEqual(try Client.fetchOne(db, key: "C1")?.name, "Tienda")
             XCTAssertEqual(try SyncState.fetchOne(db, key: "clients")?.lastSyncedAt, t)
         }
+    }
+
+    // MARK: - Subida
+
+    /// Crea una orden confirmada lista para subir. Devuelve su UUID.
+    private func seedConfirmedOrder(_ db: AppDatabase, uuid: String) throws {
+        let repo = OrdersRepository(database: db,
+                                    now: { Date(timeIntervalSince1970: 0) },
+                                    makeUUID: { uuid })
+        try db.dbQueue.write { database in
+            try Client(clientCode: "C1", name: "Tienda", address: nil, city: nil,
+                       zipcode: nil, managerName: nil, shippingRoute: nil).insert(database)
+            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil, comments: nil,
+                     price: 10, stock: nil, available: 5, imageURL: nil, active: true).insert(database)
+        }
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
+        try repo.confirm(orderUUID: order.clientUUID)
+    }
+
+    func test_push_subeConfirmadasYMarcaSincronizada() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        let engine = SyncEngine(database: db, api: api)
+
+        let failed = await engine.pushConfirmedOrders()
+
+        XCTAssertEqual(failed, 0)
+        XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .synced)
+        XCTAssertEqual(order?.orderNumber, "N-1")
+    }
+
+    func test_push_esIdempotente_noReenviaYaSincronizadas() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        let engine = SyncEngine(database: db, api: api)
+
+        await engine.pushConfirmedOrders()          // 1ª subida
+        await engine.pushConfirmedOrders()          // 2ª: ya está sincronizada
+
+        // El mismo UUID no se reenvía: solo una llamada a postOrder.
+        XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
+    }
+
+    func test_push_fallo_dejaConfirmadaParaReintento() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        api.postError = APIError.server(status: 500)
+        let engine = SyncEngine(database: db, api: api)
+
+        let failed = await engine.pushConfirmedOrders()
+
+        XCTAssertEqual(failed, 1)
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .confirmed, "sigue confirmada para reintentar")
+
+        // Al recuperar red, el reintento la sube (mismo UUID).
+        api.postError = nil
+        let failed2 = await engine.pushConfirmedOrders()
+        XCTAssertEqual(failed2, 0)
+        XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
     }
 }

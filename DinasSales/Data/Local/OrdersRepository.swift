@@ -138,6 +138,16 @@ struct OrdersRepository {
 
     // MARK: - Lecturas
 
+    /// Órdenes confirmadas pendientes de subir, más antiguas primero.
+    func confirmedOrders() throws -> [Order] {
+        try database.dbQueue.read { db in
+            try Order
+                .filter(Column("status") == OrderStatus.confirmed.rawValue)
+                .order(Column("created_at"))
+                .fetchAll(db)
+        }
+    }
+
     /// Una orden por su `client_uuid`.
     func order(uuid: String) throws -> Order? {
         try database.dbQueue.read { db in

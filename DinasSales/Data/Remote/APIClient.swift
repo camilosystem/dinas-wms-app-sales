@@ -12,12 +12,18 @@ protocol SyncDownAPI {
     func fetchClients(since: Date?) async throws -> ClientsPage
 }
 
+/// Superficie de sincronización de subida (requiere token).
+protocol SyncUpAPI {
+    /// `POST /orders`. Idempotente por `client_uuid`.
+    func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO
+}
+
 /// Cliente HTTP contra el middleware, según `dinas-wms-contracts/openapi.yaml`.
 ///
 /// El JWT se inyecta vía `tokenProvider` y se añade como `Authorization: Bearer` en
 /// todos los endpoints salvo `login` (público). Si falta un campo/endpoint en el
 /// contrato, no se inventa: se eleva al Arquitecto.
-struct APIClient: AuthAPI, SyncDownAPI {
+struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
     /// URL base del middleware (incluye el path base `/v1`). Ver `AppConfig`.
     var baseURL: URL?
     var session: URLSession

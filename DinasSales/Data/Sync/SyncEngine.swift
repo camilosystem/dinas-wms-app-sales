@@ -9,17 +9,43 @@ import GRDB
 @MainActor
 final class SyncEngine: ObservableObject {
     private let database: AppDatabase
-    private let api: SyncDownAPI
+    private let api: SyncDownAPI & SyncUpAPI
 
     @Published private(set) var isSyncing = false
     @Published private(set) var lastError: String?
 
-    init(database: AppDatabase, api: SyncDownAPI) {
+    init(database: AppDatabase, api: SyncDownAPI & SyncUpAPI) {
         self.database = database
         self.api = api
     }
 
-    /// Sincronización de bajada: catálogo + clientes.
+    private var ordersRepo: OrdersRepository { OrdersRepository(database: database) }
+
+    /// Sincronización completa: sube órdenes confirmadas y baja catálogo + clientes.
+    /// Sube primero para no perder trabajo del vendedor si la bajada falla.
+    func sync() async {
+        isSyncing = true
+        lastError = nil
+        defer { isSyncing = false }
+
+        var problems: [String] = []
+
+        let failedUploads = await pushConfirmedOrders()
+        if failedUploads > 0 { problems.append("\(failedUploads) orden(es) sin subir") }
+
+        do {
+            try await pullCatalog()
+            try await pullClients()
+        } catch {
+            problems.append("bajada de datos")
+        }
+
+        if !problems.isEmpty {
+            lastError = "No se completó: " + problems.joined(separator: ", ") + "."
+        }
+    }
+
+    /// Solo bajada (usado por el pull-to-refresh de catálogo/clientes).
     func syncDown() async {
         isSyncing = true
         lastError = nil
@@ -30,6 +56,35 @@ final class SyncEngine: ObservableObject {
         } catch {
             lastError = "No se pudo sincronizar. Revisa la conexión."
         }
+    }
+
+    // MARK: - Subida
+
+    /// Sube todas las órdenes confirmadas y las marca sincronizadas. Devuelve cuántas
+    /// fallaron. El reintento es seguro: `client_uuid` hace idempotente el `POST /orders`
+    /// (una orden ya recibida responde 200 y no se duplica).
+    @discardableResult
+    func pushConfirmedOrders() async -> Int {
+        let repo = ordersRepo
+        let pending: [Order]
+        do {
+            pending = try repo.confirmedOrders()
+        } catch {
+            return 1
+        }
+
+        var failed = 0
+        for order in pending {
+            do {
+                let lines = try repo.lines(orderUUID: order.clientUUID)
+                let accepted = try await api.postOrder(order, lines: lines)
+                try repo.markSynced(orderUUID: order.clientUUID,
+                                    orderNumber: accepted.orderNumber)
+            } catch {
+                failed += 1   // se reintenta en la próxima sync (mismo UUID)
+            }
+        }
+        return failed
     }
 
     // MARK: - Bajada

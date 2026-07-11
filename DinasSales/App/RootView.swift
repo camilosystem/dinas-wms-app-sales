@@ -47,7 +47,7 @@ struct HomeView: View {
                 }
 
                 Button {
-                    Task { await environment.sync.syncDown() }
+                    Task { await environment.sync.sync() }
                 } label: {
                     HStack {
                         if environment.sync.isSyncing {

@@ -21,7 +21,10 @@
       "Bash(git commit -q -m 'feat\\(catalog\\): grilla, busqueda local offline y detalle + sync en Home *)",
       "Bash(git commit -q -m 'feat\\(clients\\): lista de clientes asignados, busqueda local y detalle *)",
       "Bash(git commit -q -m 'feat\\(orders\\): repositorio de toma de orden \\(cliente primero\\) *)",
-      "Bash(git commit -q -m 'feat\\(orders\\): UI de toma de orden \\(carrito, descuento, borrador/confirmar\\) *)"
+      "Bash(git commit -q -m 'feat\\(orders\\): UI de toma de orden \\(carrito, descuento, borrador/confirmar\\) *)",
+      "Bash(perl -0pi -e 's/StubSyncDownAPI\\\\\\(/StubSyncAPI\\(/g' DinasSalesTests/SyncEngineTests.swift)",
+      "Bash(perl -0pi -e 's/let order = try db\\\\.dbQueue\\\\.read \\\\{ try Order\\\\.fetchOne\\\\\\(\\\\$0, key: \"ORD-1\"\\\\\\) \\\\}/let order = try await db.dbQueue.read { try Order.fetchOne\\($0, key: \"ORD-1\"\\) }/g' DinasSalesTests/SyncEngineTests.swift)",
+      "Bash(git commit -q -m 'feat\\(sync\\): subida de ordenes confirmadas \\(POST /orders idempotente\\) *)"
     ]
   }
 }
