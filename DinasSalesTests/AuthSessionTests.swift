@@ -58,6 +58,19 @@ final class AuthSessionTests: XCTestCase {
         XCTAssertNil(try store.read())
     }
 
+    func test_sessionExpired_borraTokenYMuestraMensaje() {
+        let store = InMemoryTokenStore(token: "jwt-viejo")
+        let session = AuthSession(api: StubAuthAPI(token: "x"), store: store)
+        session.restore()
+        XCTAssertEqual(session.state, .signedIn)
+
+        session.sessionExpired()
+
+        XCTAssertEqual(session.state, .signedOut)
+        XCTAssertNil(try? store.read())
+        XCTAssertEqual(session.errorMessage, "Tu sesión expiró. Inicia sesión de nuevo.")
+    }
+
     func test_logout_borraTokenYSignedOut() async {
         let store = InMemoryTokenStore(token: "jwt-previo")
         let session = AuthSession(api: StubAuthAPI(token: "x"), store: store)

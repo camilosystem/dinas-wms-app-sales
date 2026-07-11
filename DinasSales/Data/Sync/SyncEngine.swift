@@ -10,13 +10,18 @@ import GRDB
 final class SyncEngine: ObservableObject {
     private let database: AppDatabase
     private let api: SyncDownAPI & SyncUpAPI
+    /// Se invoca cuando el middleware responde 401 (token ausente/expirado) → re-login.
+    var onUnauthorized: () -> Void
 
     @Published private(set) var isSyncing = false
     @Published private(set) var lastError: String?
 
-    init(database: AppDatabase, api: SyncDownAPI & SyncUpAPI) {
+    init(database: AppDatabase,
+         api: SyncDownAPI & SyncUpAPI,
+         onUnauthorized: @escaping () -> Void = {}) {
         self.database = database
         self.api = api
+        self.onUnauthorized = onUnauthorized
     }
 
     private var ordersRepo: OrdersRepository { OrdersRepository(database: database) }
@@ -28,20 +33,17 @@ final class SyncEngine: ObservableObject {
         lastError = nil
         defer { isSyncing = false }
 
-        var problems: [String] = []
-
-        let failedUploads = await pushConfirmedOrders()
-        if failedUploads > 0 { problems.append("\(failedUploads) orden(es) sin subir") }
-
         do {
+            let failedUploads = try await pushConfirmedOrders()
             try await pullCatalog()
             try await pullClients()
+            if failedUploads > 0 {
+                lastError = "\(failedUploads) orden(es) sin subir. Se reintentará."
+            }
+        } catch APIError.unauthorized {
+            onUnauthorized()
         } catch {
-            problems.append("bajada de datos")
-        }
-
-        if !problems.isEmpty {
-            lastError = "No se completó: " + problems.joined(separator: ", ") + "."
+            lastError = "No se pudo sincronizar. Revisa la conexión."
         }
     }
 
@@ -53,6 +55,8 @@ final class SyncEngine: ObservableObject {
         do {
             try await pullCatalog()
             try await pullClients()
+        } catch APIError.unauthorized {
+            onUnauthorized()
         } catch {
             lastError = "No se pudo sincronizar. Revisa la conexión."
         }
@@ -61,17 +65,13 @@ final class SyncEngine: ObservableObject {
     // MARK: - Subida
 
     /// Sube todas las órdenes confirmadas y las marca sincronizadas. Devuelve cuántas
-    /// fallaron. El reintento es seguro: `client_uuid` hace idempotente el `POST /orders`
-    /// (una orden ya recibida responde 200 y no se duplica).
+    /// fallaron por causas transitorias (red/servidor). El reintento es seguro:
+    /// `client_uuid` hace idempotente el `POST /orders` (una orden ya recibida responde
+    /// 200 y no se duplica). Un 401 se propaga para forzar re-login.
     @discardableResult
-    func pushConfirmedOrders() async -> Int {
+    func pushConfirmedOrders() async throws -> Int {
         let repo = ordersRepo
-        let pending: [Order]
-        do {
-            pending = try repo.confirmedOrders()
-        } catch {
-            return 1
-        }
+        let pending = try repo.confirmedOrders()
 
         var failed = 0
         for order in pending {
@@ -80,8 +80,10 @@ final class SyncEngine: ObservableObject {
                 let accepted = try await api.postOrder(order, lines: lines)
                 try repo.markSynced(orderUUID: order.clientUUID,
                                     orderNumber: accepted.orderNumber)
+            } catch APIError.unauthorized {
+                throw APIError.unauthorized   // token expirado → detener y re-login
             } catch {
-                failed += 1   // se reintenta en la próxima sync (mismo UUID)
+                failed += 1                   // transitorio: se reintenta (mismo UUID)
             }
         }
         return failed

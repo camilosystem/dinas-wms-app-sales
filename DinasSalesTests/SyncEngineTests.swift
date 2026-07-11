@@ -14,6 +14,8 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI {
     private(set) var postedUUIDs: [String] = []
     /// Si es no-nil, `postOrder` lanza ese error.
     var postError: Error?
+    /// Si es no-nil, `fetchCatalog`/`fetchClients` lanzan ese error.
+    var fetchError: Error?
 
     init(catalog: CatalogPage = CatalogPage(items: [], serverTime: Date(timeIntervalSince1970: 0)),
          clients: ClientsPage = ClientsPage(clients: [], serverTime: Date(timeIntervalSince1970: 0))) {
@@ -22,11 +24,13 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI {
     }
 
     func fetchCatalog(since: Date?) async throws -> CatalogPage {
+        if let fetchError { throw fetchError }
         lastCatalogSince = since
         return catalog
     }
 
     func fetchClients(since: Date?) async throws -> ClientsPage {
+        if let fetchError { throw fetchError }
         lastClientsSince = since
         return clients
     }
@@ -139,7 +143,7 @@ final class SyncEngineTests: XCTestCase {
         let api = StubSyncAPI()
         let engine = SyncEngine(database: db, api: api)
 
-        let failed = await engine.pushConfirmedOrders()
+        let failed = try await engine.pushConfirmedOrders()
 
         XCTAssertEqual(failed, 0)
         XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
@@ -154,8 +158,8 @@ final class SyncEngineTests: XCTestCase {
         let api = StubSyncAPI()
         let engine = SyncEngine(database: db, api: api)
 
-        await engine.pushConfirmedOrders()          // 1ª subida
-        await engine.pushConfirmedOrders()          // 2ª: ya está sincronizada
+        _ = try await engine.pushConfirmedOrders()          // 1ª subida
+        _ = try await engine.pushConfirmedOrders()          // 2ª: ya está sincronizada
 
         // El mismo UUID no se reenvía: solo una llamada a postOrder.
         XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
@@ -168,7 +172,7 @@ final class SyncEngineTests: XCTestCase {
         api.postError = APIError.server(status: 500)
         let engine = SyncEngine(database: db, api: api)
 
-        let failed = await engine.pushConfirmedOrders()
+        let failed = try await engine.pushConfirmedOrders()
 
         XCTAssertEqual(failed, 1)
         let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
@@ -176,8 +180,37 @@ final class SyncEngineTests: XCTestCase {
 
         // Al recuperar red, el reintento la sube (mismo UUID).
         api.postError = nil
-        let failed2 = await engine.pushConfirmedOrders()
+        let failed2 = try await engine.pushConfirmedOrders()
         XCTAssertEqual(failed2, 0)
         XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
+    }
+
+    // MARK: - 401 / sesión expirada
+
+    func test_sync_subida401_llamaOnUnauthorized() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        api.postError = APIError.unauthorized
+        var expired = false
+        let engine = SyncEngine(database: db, api: api, onUnauthorized: { expired = true })
+
+        await engine.sync()
+
+        XCTAssertTrue(expired, "un 401 en la subida debe disparar re-login")
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .confirmed, "no se marca sincronizada con token inválido")
+    }
+
+    func test_syncDown_bajada401_llamaOnUnauthorized() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let api = StubSyncAPI()
+        api.fetchError = APIError.unauthorized
+        var expired = false
+        let engine = SyncEngine(database: db, api: api, onUnauthorized: { expired = true })
+
+        await engine.syncDown()
+
+        XCTAssertTrue(expired)
     }
 }

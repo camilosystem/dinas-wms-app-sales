@@ -4,6 +4,7 @@ import SwiftUI
 /// La estructura de tabs es estable; cada feature se desarrolla en su propia pantalla.
 struct RootView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @EnvironmentObject private var pendingOrders: PendingOrdersObserver
 
     var body: some View {
         TabView {
@@ -18,6 +19,7 @@ struct RootView: View {
 
             OrdersView()
                 .tabItem { Label("Órdenes", systemImage: "cart") }
+                .badge(pendingOrders.count)
         }
     }
 }

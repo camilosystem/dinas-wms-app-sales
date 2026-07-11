@@ -15,6 +15,7 @@ struct AuthGate: View {
                     .environmentObject(environment.auth)
             case .signedIn:
                 RootView()
+                    .environmentObject(environment.pendingOrders)
             }
         }
         .task { environment.auth.restore() }

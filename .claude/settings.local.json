@@ -42,7 +42,9 @@
       "Bash(sips -g pixelWidth -g pixelHeight -g hasAlpha DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
       "Bash(sips -g hasAlpha DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
       "Bash(git commit -q -m 'build\\(assets\\): icono de app \\(placeholder\\) + asset catalog *)",
-      "Bash(git commit -q -m 'build\\(dist\\): pipeline de distribucion interna JAMF \\(enterprise\\) *)"
+      "Bash(git commit -q -m 'build\\(dist\\): pipeline de distribucion interna JAMF \\(enterprise\\) *)",
+      "Bash(perl -0pi -e 's/let failed = await engine\\\\.pushConfirmedOrders\\\\\\(\\\\\\)/let failed = try await engine.pushConfirmedOrders\\(\\)/g; s/let failed2 = await engine\\\\.pushConfirmedOrders\\\\\\(\\\\\\)/let failed2 = try await engine.pushConfirmedOrders\\(\\)/g; s/        await engine\\\\.pushConfirmedOrders\\\\\\(\\\\\\)/        _ = try await engine.pushConfirmedOrders\\(\\)/g' DinasSalesTests/SyncEngineTests.swift)",
+      "Bash(git commit -q -m 'feat\\(sync\\): endurecimiento \\(401 re-login, badge pendientes, auto-sync\\) *)"
     ]
   }
 }

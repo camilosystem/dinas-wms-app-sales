@@ -61,4 +61,12 @@ final class AuthSession: ObservableObject {
         displayName = nil
         state = .signedOut
     }
+
+    /// La sesión expiró (401 del middleware): limpia el token y pide re-login.
+    func sessionExpired() {
+        try? store.clear()
+        displayName = nil
+        errorMessage = "Tu sesión expiró. Inicia sesión de nuevo."
+        state = .signedOut
+    }
 }

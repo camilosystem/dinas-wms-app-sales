@@ -13,23 +13,45 @@ final class AppEnvironment: ObservableObject {
     let api: APIClient
     let sync: SyncEngine
     let auth: AuthSession
+    let pendingOrders: PendingOrdersObserver
+    let network: NetworkMonitor
 
     init() {
         // Base local en el contenedor de la app. Si falla la apertura, es un error
         // no recuperable: la app offline-first no puede operar sin su base.
+        let database: AppDatabase
         do {
-            self.database = try AppDatabase.makeShared()
+            database = try AppDatabase.makeShared()
         } catch {
             fatalError("No se pudo abrir la base local: \(error)")
         }
+        self.database = database
+
         // El token del Keychain alimenta tanto al cliente HTTP (Authorization: Bearer)
         // como a la sesión, para que ambos vean el mismo almacenamiento.
         let tokenStore = KeychainTokenStore()
-        self.api = APIClient(
+        let api = APIClient(
             baseURL: AppConfig.middlewareBaseURL,
             tokenProvider: { try? tokenStore.read() }
         )
-        self.sync = SyncEngine(database: database, api: api)
-        self.auth = AuthSession(api: api, store: tokenStore)
+        self.api = api
+
+        let auth = AuthSession(api: api, store: tokenStore)
+        self.auth = auth
+
+        // Un 401 durante la sincronización expira la sesión → la app vuelve al login.
+        let sync = SyncEngine(database: database, api: api,
+                              onUnauthorized: { auth.sessionExpired() })
+        self.sync = sync
+
+        self.pendingOrders = PendingOrdersObserver(database: database)
+
+        // Auto-sync al recuperar la red, solo si hay sesión activa.
+        let network = NetworkMonitor()
+        network.onReconnect = { [weak auth, weak sync] in
+            guard let auth, let sync, auth.state == .signedIn else { return }
+            Task { await sync.sync() }
+        }
+        self.network = network
     }
 }

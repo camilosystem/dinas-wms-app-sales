@@ -25,7 +25,12 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift")
             ],
-            path: "DinasSales"
+            path: "DinasSales",
+            // Recursos que pertenecen al target de app iOS (.xcodeproj), no al paquete SPM.
+            exclude: [
+                "Resources/Info.plist",
+                "Resources/Assets.xcassets"
+            ]
         ),
         .testTarget(
             name: "DinasSalesTests",
