@@ -24,6 +24,8 @@ struct ItemPickerView: View {
     var body: some View {
         NavigationStack {
             List(viewModel.items) { item in
+                // price = null → ítem sin precio de lista: no ordenable (dato ausente).
+                let orderable = item.price != nil
                 Button {
                     addedHere[item.itemCode, default: 0] += 1
                     onAdd(item)
@@ -35,6 +37,8 @@ struct ItemPickerView: View {
                                 Text(item.itemCode)
                                 if let price = item.price {
                                     Text("· \(MoneyFormat.string(price))")
+                                } else {
+                                    Text("· Sin precio").foregroundStyle(.red)
                                 }
                                 Text("· Disp \(item.available.formatted())")
                                     .foregroundStyle(item.available > 0 ? .green : .red)
@@ -49,10 +53,12 @@ struct ItemPickerView: View {
                                 .font(.callout.weight(.semibold))
                                 .foregroundStyle(.tint)
                         }
-                        Image(systemName: "plus.circle.fill").foregroundStyle(.tint)
+                        Image(systemName: orderable ? "plus.circle.fill" : "nosign")
+                            .foregroundStyle(orderable ? Color.accentColor : .secondary)
                     }
                 }
                 .buttonStyle(.plain)
+                .disabled(!orderable)
             }
             .navigationTitle("Agregar ítems")
             .searchable(text: $viewModel.searchText, prompt: "Código, nombre o palabra")

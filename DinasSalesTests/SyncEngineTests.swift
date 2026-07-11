@@ -189,7 +189,7 @@ final class SyncEngineTests: XCTestCase {
     // MARK: - Subida
 
     /// Crea una orden confirmada lista para subir. Devuelve su UUID.
-    private func seedConfirmedOrder(_ db: AppDatabase, uuid: String) throws {
+    private func seedConfirmedOrder(_ db: AppDatabase, uuid: String, price: Double = 10) throws {
         let repo = OrdersRepository(database: db,
                                     now: { Date(timeIntervalSince1970: 0) },
                                     makeUUID: { uuid })
@@ -197,7 +197,7 @@ final class SyncEngineTests: XCTestCase {
             try Client(clientCode: "C1", name: "Tienda", address: nil, city: nil,
                        zipcode: nil, managerName: nil, shippingRoute: nil).insert(database)
             try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil, comments: nil,
-                     price: 10, stock: nil, available: 5, imageURL: nil, active: true).insert(database)
+                     price: price, stock: nil, available: 5, imageURL: nil, active: true).insert(database)
         }
         let order = try repo.startOrder(clientCode: "C1")
         try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
@@ -250,6 +250,20 @@ final class SyncEngineTests: XCTestCase {
         let failed2 = try await engine.pushConfirmedOrders()
         XCTAssertEqual(failed2, 0)
         XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
+    }
+
+    func test_push_ordenTotalCero_seEnviaYMarcaSincronizada() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-0", price: 0)   // línea a unit_price = 0
+        let api = StubSyncAPI()
+        let engine = SyncEngine(database: db, api: api)
+
+        let failed = try await engine.pushConfirmedOrders()
+
+        XCTAssertEqual(failed, 0)
+        XCTAssertEqual(api.postedUUIDs, ["ORD-0"], "la orden a total cero se envía igual")
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-0") }
+        XCTAssertEqual(order?.status, .synced)
     }
 
     // MARK: - Idempotencia end-to-end (servidor simulado)

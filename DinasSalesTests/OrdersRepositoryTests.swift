@@ -136,4 +136,77 @@ final class OrdersRepositoryTests: XCTestCase {
             XCTAssertEqual(error as? OrdersError, .notADraft)
         }
     }
+
+    // MARK: - Regla de precio (cero es decisión; null es ausencia)
+
+    /// Inserta un ítem con `price` explícito (posible cero o nil).
+    private func seedItem(_ db: AppDatabase, code: String, price: Double?) throws {
+        try db.dbQueue.write { database in
+            try Item(itemCode: code, name: "Item \(code)", category: nil, barcode: nil,
+                     comments: nil, price: price, stock: nil, available: 100,
+                     imageURL: nil, active: true).insert(database)
+        }
+    }
+
+    func test_setQuantity_precioCero_creaLineaEnCero() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try seedItem(db, code: "PROMO", price: 0)          // línea regalada: 0 es válido
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "PROMO", quantity: 3)
+
+        let lines = try repo.lines(orderUUID: order.clientUUID)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].unitPrice, 0)
+        XCTAssertEqual(OrdersRepository.lineTotal(lines[0]), 0)
+    }
+
+    func test_ordenTotalCero_sePuedeConfirmar() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try seedItem(db, code: "PROMO", price: 0)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "PROMO", quantity: 2)
+
+        // Total en cero, pero con línea: se confirma sin problema.
+        try repo.confirm(orderUUID: order.clientUUID)
+
+        let confirmed = try db.dbQueue.read { try Order.fetchOne($0, key: order.clientUUID) }
+        XCTAssertEqual(confirmed?.status, .confirmed)
+        XCTAssertEqual(try repo.summaries().first?.total, 0)
+    }
+
+    func test_descuentoCien_esValido_totalCero() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2) // 2×10
+
+        try repo.setDiscount(orderUUID: order.clientUUID, itemCode: "I1", percent: 100)
+
+        let line = try repo.lines(orderUUID: order.clientUUID)[0]
+        XCTAssertEqual(line.lineDiscountPct, 100)
+        XCTAssertEqual(OrdersRepository.lineTotal(line), 0)
+        // Y con descuento 100% la orden se puede confirmar.
+        XCTAssertNoThrow(try repo.confirm(orderUUID: order.clientUUID))
+    }
+
+    func test_setQuantity_precioNull_noSePuedeAgregar() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try seedItem(db, code: "SINPRECIO", price: nil)   // dato ausente: no ordenable
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+
+        XCTAssertThrowsError(
+            try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "SINPRECIO", quantity: 1)
+        ) { error in
+            XCTAssertEqual(error as? OrdersError, .itemNotOrderable)
+        }
+        XCTAssertTrue(try repo.lines(orderUUID: order.clientUUID).isEmpty, "no se creó línea")
+    }
 }

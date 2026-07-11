@@ -80,6 +80,9 @@ final class OrderCartViewModel: ObservableObject {
         do {
             try action()
             reload()
+        } catch OrdersError.itemNotOrderable {
+            // Backstop: la UI ya oculta estos ítems, pero por si acaso.
+            errorMessage = "Ese ítem no tiene precio y no se puede ordenar."
         } catch {
             errorMessage = "No se pudo actualizar el carrito."
         }

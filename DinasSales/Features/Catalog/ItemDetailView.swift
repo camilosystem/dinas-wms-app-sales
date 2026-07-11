@@ -21,7 +21,10 @@ struct ItemDetailView: View {
                     stat("Disponible", item.available.formatted(),
                          color: item.available > 0 ? .green : .red)
                     if let price = item.price {
-                        stat("Precio", price.formatted(.currency(code: "USD")))
+                        stat("Precio", MoneyFormat.string(price))
+                    } else {
+                        // price = null: sin precio de lista → no ordenable.
+                        stat("Precio", "Sin precio", color: .red)
                     }
                 }
 

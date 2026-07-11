@@ -2,10 +2,10 @@ import Foundation
 
 /// Formateo de importes.
 ///
-/// ⚠️ La moneda NO está en `openapi.yaml`. Se usa un placeholder; confirmar con el
-/// Arquitecto el código de moneda (o si el middleware ya envía importes formateados).
+/// Dinas opera solo en NY/NJ/CT/PA, en dólares: la moneda es **USD fija** (decisión del
+/// Arquitecto). No hay campo `currency` en el contrato ni manejo multi-moneda.
 enum MoneyFormat {
-    static let currencyCode = "USD"   // TODO(contrato): confirmar moneda real
+    static let currencyCode = "USD"
 
     static func string(_ amount: Double) -> String {
         amount.formatted(.currency(code: currencyCode))

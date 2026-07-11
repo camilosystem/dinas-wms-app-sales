@@ -92,6 +92,9 @@ struct OrdersRepository {
 
     /// Fija la cantidad de un ítem en la orden. Si no existe la línea, la crea tomando
     /// el `unit_price` del catálogo (price de la lista asignada). `quantity <= 0` la elimina.
+    ///
+    /// Regla de precio: `price = 0` es válido (promoción / línea regalada). `price = null`
+    /// es un dato ausente → el ítem NO es ordenable y se rechaza (nunca se sustituye por 0).
     func setQuantity(orderUUID: String, itemCode: String, quantity: Double) throws {
         try database.dbQueue.write { db in
             let existing = try OrderLine
@@ -108,13 +111,19 @@ struct OrdersRepository {
                 line.quantity = quantity
                 try line.update(db)
             } else {
-                let item = try Item.fetchOne(db, key: itemCode)
+                guard let item = try Item.fetchOne(db, key: itemCode) else {
+                    throw OrdersError.itemNotFound
+                }
+                // price = 0 pasa el guard (promoción); price = null lo rechaza.
+                guard let unitPrice = item.price else {
+                    throw OrdersError.itemNotOrderable
+                }
                 var line = OrderLine(
                     id: nil,
                     orderUUID: orderUUID,
                     itemCode: itemCode,
                     quantity: quantity,
-                    unitPrice: item?.price ?? 0,
+                    unitPrice: unitPrice,
                     lineDiscountPct: 0,
                     priceList: nil
                 )
@@ -201,4 +210,6 @@ enum OrdersError: Error, Equatable {
     case orderNotFound
     case notADraft
     case emptyOrder
+    case itemNotFound
+    case itemNotOrderable   // ítem sin precio de lista (price = null): dato ausente
 }
