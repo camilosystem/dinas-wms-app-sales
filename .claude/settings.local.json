@@ -41,7 +41,8 @@
       "Bash(sips -g pixelWidth -g pixelHeight DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
       "Bash(sips -g pixelWidth -g pixelHeight -g hasAlpha DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
       "Bash(sips -g hasAlpha DinasSales/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png)",
-      "Bash(git commit -q -m 'build\\(assets\\): icono de app \\(placeholder\\) + asset catalog *)"
+      "Bash(git commit -q -m 'build\\(assets\\): icono de app \\(placeholder\\) + asset catalog *)",
+      "Bash(git commit -q -m 'build\\(dist\\): pipeline de distribucion interna JAMF \\(enterprise\\) *)"
     ]
   }
 }

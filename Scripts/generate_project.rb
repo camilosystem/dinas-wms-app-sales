@@ -96,8 +96,7 @@ app.build_configurations.each do |config|
   s['CODE_SIGN_STYLE'] = 'Automatic'
   s['ENABLE_PREVIEWS'] = 'YES'
   s['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
-  s['DEVELOPMENT_TEAM'] = ''   # <- Team ID de Apple para firmar (JAMF/enterprise)
-  # MIDDLEWARE_BASE_URL y APP_DISPLAY_NAME llegan desde el .xcconfig del ambiente.
+  # MIDDLEWARE_BASE_URL, APP_DISPLAY_NAME y DEVELOPMENT_TEAM llegan del .xcconfig.
 end
 
 # Staging para project + app, y enlace de cada configuración a su .xcconfig.

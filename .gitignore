@@ -57,3 +57,8 @@ secrets.plist
 # Editor
 *.swp
 *~.nib
+
+# Archivos de build/export
+build/
+*.xcarchive
+*.ipa

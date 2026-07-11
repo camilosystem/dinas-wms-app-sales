@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "39F365E9918B842F6BEF7383"
+               BlueprintIdentifier = "88D038DF66DAF8822E6CF588"
                BuildableName = "DinasSales.app"
                BlueprintName = "DinasSales"
                ReferencedContainer = "container:DinasSales.xcodeproj">
@@ -30,7 +30,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "39F365E9918B842F6BEF7383"
+            BlueprintIdentifier = "88D038DF66DAF8822E6CF588"
             BuildableName = "DinasSales.app"
             BlueprintName = "DinasSales"
             ReferencedContainer = "container:DinasSales.xcodeproj">
@@ -41,7 +41,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C2F3DCA93B65717D165D0C6B"
+               BlueprintIdentifier = "32684F1988B931BD00D75960"
                BuildableName = "DinasSalesTests.xctest"
                BlueprintName = "DinasSalesTests"
                ReferencedContainer = "container:DinasSales.xcodeproj">
@@ -63,7 +63,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "39F365E9918B842F6BEF7383"
+            BlueprintIdentifier = "88D038DF66DAF8822E6CF588"
             BuildableName = "DinasSales.app"
             BlueprintName = "DinasSales"
             ReferencedContainer = "container:DinasSales.xcodeproj">
@@ -80,7 +80,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "39F365E9918B842F6BEF7383"
+            BlueprintIdentifier = "88D038DF66DAF8822E6CF588"
             BuildableName = "DinasSales.app"
             BlueprintName = "DinasSales"
             ReferencedContainer = "container:DinasSales.xcodeproj">
