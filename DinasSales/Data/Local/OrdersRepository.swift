@@ -138,6 +138,13 @@ struct OrdersRepository {
 
     // MARK: - Lecturas
 
+    /// Una orden por su `client_uuid`.
+    func order(uuid: String) throws -> Order? {
+        try database.dbQueue.read { db in
+            try Order.fetchOne(db, key: uuid)
+        }
+    }
+
     /// Líneas de una orden, con el nombre del ítem para mostrar.
     func lines(orderUUID: String) throws -> [OrderLine] {
         try database.dbQueue.read { db in

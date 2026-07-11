@@ -20,7 +20,8 @@
       "Bash(git commit -q -m 'refactor: alinear modelos, DTOs y auth con openapi.yaml *)",
       "Bash(git commit -q -m 'feat\\(catalog\\): grilla, busqueda local offline y detalle + sync en Home *)",
       "Bash(git commit -q -m 'feat\\(clients\\): lista de clientes asignados, busqueda local y detalle *)",
-      "Bash(git commit -q -m 'feat\\(orders\\): repositorio de toma de orden \\(cliente primero\\) *)"
+      "Bash(git commit -q -m 'feat\\(orders\\): repositorio de toma de orden \\(cliente primero\\) *)",
+      "Bash(git commit -q -m 'feat\\(orders\\): UI de toma de orden \\(carrito, descuento, borrador/confirmar\\) *)"
     ]
   }
 }
