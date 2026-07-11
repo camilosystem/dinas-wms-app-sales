@@ -18,7 +18,8 @@
       "Bash(perl -0pi -e 's/StubAuthAPI\\\\\\(result: \\\\.success\\\\\\(\"t\"\\\\\\)\\\\\\)/StubAuthAPI\\(token: \"t\"\\)/g; s/StubAuthAPI\\\\\\(result: \\\\.success\\\\\\(\"jwt-123\"\\\\\\)\\\\\\)/StubAuthAPI\\(token: \"jwt-123\"\\)/g; s/StubAuthAPI\\\\\\(result: \\\\.success\\\\\\(\"x\"\\\\\\)\\\\\\)/StubAuthAPI\\(token: \"x\"\\)/g' DinasSalesTests/AuthSessionTests.swift)",
       "Bash(perl -0pi -e 's/try db\\\\.dbQueue\\\\.read \\\\{ db in/try await db.dbQueue.read { db in/g' DinasSalesTests/SyncEngineTests.swift)",
       "Bash(git commit -q -m 'refactor: alinear modelos, DTOs y auth con openapi.yaml *)",
-      "Bash(git commit -q -m 'feat\\(catalog\\): grilla, busqueda local offline y detalle + sync en Home *)"
+      "Bash(git commit -q -m 'feat\\(catalog\\): grilla, busqueda local offline y detalle + sync en Home *)",
+      "Bash(git commit -q -m 'feat\\(clients\\): lista de clientes asignados, busqueda local y detalle *)"
     ]
   }
 }

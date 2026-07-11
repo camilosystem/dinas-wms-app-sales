@@ -13,7 +13,7 @@ struct RootView: View {
             CatalogView(database: environment.database)
                 .tabItem { Label("Catálogo", systemImage: "square.grid.2x2") }
 
-            ClientsView()
+            ClientsView(database: environment.database)
                 .tabItem { Label("Clientes", systemImage: "person.2") }
 
             OrdersView()
