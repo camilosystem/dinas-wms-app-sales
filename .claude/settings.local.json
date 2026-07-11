@@ -46,7 +46,8 @@
       "Bash(perl -0pi -e 's/let failed = await engine\\\\.pushConfirmedOrders\\\\\\(\\\\\\)/let failed = try await engine.pushConfirmedOrders\\(\\)/g; s/let failed2 = await engine\\\\.pushConfirmedOrders\\\\\\(\\\\\\)/let failed2 = try await engine.pushConfirmedOrders\\(\\)/g; s/        await engine\\\\.pushConfirmedOrders\\\\\\(\\\\\\)/        _ = try await engine.pushConfirmedOrders\\(\\)/g' DinasSalesTests/SyncEngineTests.swift)",
       "Bash(git commit -q -m 'feat\\(sync\\): endurecimiento \\(401 re-login, badge pendientes, auto-sync\\) *)",
       "Bash(git commit -q -m 'feat\\(ux\\): banner offline global + bundle IDs por ambiente *)",
-      "Bash(git commit -q -m 'test\\(sync\\): idempotencia end-to-end \\(respuesta perdida + crash\\) *)"
+      "Bash(git commit -q -m 'test\\(sync\\): idempotencia end-to-end \\(respuesta perdida + crash\\) *)",
+      "Bash(git commit -q -m 'feat\\(sync\\): guard anti-concurrencia atomico en sync/syncDown *)"
     ]
   }
 }

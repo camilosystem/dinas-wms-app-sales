@@ -75,6 +75,41 @@ private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI {
     }
 }
 
+/// Stub con compuerta: `postOrder` se suspende hasta que el test llame `release()`.
+/// Permite mantener una sincronización "en vuelo" (con el flag puesto) mientras se
+/// dispara una segunda, de forma determinista (sin depender de timings).
+private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI {
+    private(set) var postCount = 0
+    private var entered = false
+    private var enteredCont: CheckedContinuation<Void, Never>?
+    private var releaseCont: CheckedContinuation<Void, Never>?
+
+    func fetchCatalog(since: Date?) async throws -> CatalogPage {
+        CatalogPage(items: [], serverTime: Date(timeIntervalSince1970: 0))
+    }
+    func fetchClients(since: Date?) async throws -> ClientsPage {
+        ClientsPage(clients: [], serverTime: Date(timeIntervalSince1970: 0))
+    }
+
+    func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO {
+        postCount += 1
+        entered = true
+        enteredCont?.resume(); enteredCont = nil
+        await withCheckedContinuation { releaseCont = $0 }   // se bloquea hasta release()
+        return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: "N-\(postCount)",
+                                status: "SINCRONIZADA", receivedAt: nil)
+    }
+
+    /// Espera a que `postOrder` haya sido invocado (la 1ª sync está dentro y con flag).
+    func waitUntilEntered() async {
+        if entered { return }
+        await withCheckedContinuation { enteredCont = $0 }
+    }
+
+    func release() { releaseCont?.resume(); releaseCont = nil }
+    func posts() -> Int { postCount }
+}
+
 @MainActor
 final class SyncEngineTests: XCTestCase {
 
@@ -262,6 +297,39 @@ final class SyncEngineTests: XCTestCase {
                        "reusa el UUID persistido, no genera uno nuevo")
         let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
         XCTAssertEqual(order?.status, .synced)
+    }
+
+    // MARK: - Guard anti-concurrencia
+
+    /// Dos `sync()` concurrentes: solo uno ejecuta la subida; el segundo retorna sin
+    /// hacer peticiones mientras el primero sigue en vuelo.
+    func test_sync_concurrente_soloUnoEjecuta() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = GatedUploadAPI()
+        let engine = SyncEngine(database: db, api: api)
+
+        // A: primera sync. Se suspende dentro de postOrder con isSyncing = true.
+        let first = Task { await engine.sync() }
+        await api.waitUntilEntered()
+        XCTAssertTrue(engine.isSyncing, "la primera sync está en curso")
+
+        // B: segunda sync mientras A sigue en vuelo → el guard la descarta.
+        await engine.sync()
+
+        // Solo A hizo la petición (B no llamó a postOrder).
+        let postsMientrasEnVuelo = await api.posts()
+        XCTAssertEqual(postsMientrasEnVuelo, 1, "el segundo sync no hizo peticiones")
+
+        // Libera A y espera a que termine.
+        await api.release()
+        await first.value
+
+        let postsTotales = await api.posts()
+        XCTAssertEqual(postsTotales, 1, "en total, una sola subida")
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .synced)
+        XCTAssertFalse(engine.isSyncing, "el flag se limpió al terminar")
     }
 
     // MARK: - 401 / sesión expirada

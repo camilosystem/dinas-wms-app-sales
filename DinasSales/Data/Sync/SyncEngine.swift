@@ -28,10 +28,11 @@ final class SyncEngine: ObservableObject {
 
     /// Sincronización completa: sube órdenes confirmadas y baja catálogo + clientes.
     /// Sube primero para no perder trabajo del vendedor si la bajada falla.
+    /// Si ya hay una sincronización en curso, no hace nada (evita subidas duplicadas
+    /// por, p. ej., el botón manual y el auto-sync al reconectar disparando a la vez).
     func sync() async {
-        isSyncing = true
-        lastError = nil
-        defer { isSyncing = false }
+        guard beginSync() else { return }
+        defer { endSync() }
 
         do {
             let failedUploads = try await pushConfirmedOrders()
@@ -49,9 +50,9 @@ final class SyncEngine: ObservableObject {
 
     /// Solo bajada (usado por el pull-to-refresh de catálogo/clientes).
     func syncDown() async {
-        isSyncing = true
-        lastError = nil
-        defer { isSyncing = false }
+        guard beginSync() else { return }
+        defer { endSync() }
+
         do {
             try await pullCatalog()
             try await pullClients()
@@ -60,6 +61,25 @@ final class SyncEngine: ObservableObject {
         } catch {
             lastError = "No se pudo sincronizar. Revisa la conexión."
         }
+    }
+
+    /// Reserva el turno de sincronización de forma atómica y devuelve `true` si se
+    /// obtuvo. Es la sección crítica del guard anti-concurrencia:
+    ///
+    /// Al estar aislada en el `@MainActor` y **no contener ningún `await`**, la
+    /// comprobación (`guard !isSyncing`) y el seteo (`isSyncing = true`) se ejecutan sin
+    /// puntos de suspensión, así que ninguna otra llamada puede entrelazarse entre
+    /// ambas. Si ya hay una sync en curso, devuelve `false`. El flag se limpia siempre
+    /// con `endSync()` desde un `defer` (incluso si la sync falla o lanza).
+    private func beginSync() -> Bool {
+        guard !isSyncing else { return false }
+        isSyncing = true
+        lastError = nil
+        return true
+    }
+
+    private func endSync() {
+        isSyncing = false
     }
 
     // MARK: - Subida
