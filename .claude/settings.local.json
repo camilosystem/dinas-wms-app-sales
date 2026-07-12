@@ -68,7 +68,11 @@
       "Bash(git commit -q -m 'fix\\(auth\\): entitlements de Keychain \\(arregla errSecMissingEntitlement -34018\\) *)",
       "Bash(git commit -q -m 'fix\\(auth\\): AuthGate observa auth directamente \\(login no navegaba\\) *)",
       "Bash(git commit -q -m 'feat\\(sync\\): sincronizacion siempre manual + feedback y pendientes visibles *)",
-      "Bash(git commit -q -m 'feat\\(auth\\): login offline \\(sesion ligada al dispositivo\\) + errores y estado *)"
+      "Bash(git commit -q -m 'feat\\(auth\\): login offline \\(sesion ligada al dispositivo\\) + errores y estado *)",
+      "Bash(curl -sS -m 5 -o /dev/null -w \"status: %{http_code}  tiempo: %{time_total}s\\\\n\" http://192.168.1.33:5257/v1/sync/catalog)",
+      "Bash(ping -c 2 -t 3 192.168.1.33)",
+      "Bash(ipconfig getifaddr *)",
+      "Bash(git commit -q -m 'feat\\(auth\\): re-login offline con contrasena tras logout \\(Opcion C\\) *)"
     ]
   }
 }

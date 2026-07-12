@@ -35,19 +35,24 @@ final class AuthSession: ObservableObject {
 
     private let api: AuthAPI
     private let store: SessionStore
+    private let hasher: PasswordHashing
     private let now: () -> Date
 
-    init(api: AuthAPI, store: SessionStore, now: @escaping () -> Date = Date.init) {
+    init(api: AuthAPI, store: SessionStore,
+         hasher: PasswordHashing = PBKDF2Hasher(),
+         now: @escaping () -> Date = Date.init) {
         self.api = api
         self.store = store
+        self.hasher = hasher
         self.now = now
     }
 
-    /// Restaura la sesión al arrancar. Si hay sesión en el dispositivo, entra
-    /// (funcione o no la red).
+    /// Restaura la sesión al arrancar. Entra directo solo si hay sesión activa (no se
+    /// cerró sesión). Tras un logout explícito arranca en el login (aunque la credencial
+    /// siga guardada para re-login offline).
     func restore() {
         do {
-            if let session = try store.read() {
+            if let session = try store.read(), !session.loggedOut {
                 displayName = session.displayName
                 username = session.username
                 state = .signedIn
@@ -67,17 +72,7 @@ final class AuthSession: ObservableObject {
         defer { isAuthenticating = false }
 
         guard isOnline else {
-            // Sin conexión: entra si el dispositivo ya tiene sesión; si no, no puede.
-            if let existing = try? store.read() {
-                displayName = existing.displayName
-                self.username = existing.username
-                state = .signedIn
-                AppLog.auth.info("login offline con sesión previa")
-            } else {
-                loginFailure = .offlineNoSession
-                errorMessage = "Sin conexión. La primera vez necesitas conexión para iniciar sesión."
-                AppLog.auth.warning("login offline sin sesión previa")
-            }
+            offlineLogin(username: username, password: password)
             return
         }
 
@@ -88,7 +83,9 @@ final class AuthSession: ObservableObject {
                 username: username,
                 displayName: response.displayName,
                 salespersonCode: response.salespersonCode,
-                lastOnlineLoginAt: now()
+                lastOnlineLoginAt: now(),
+                passwordHash: try hasher.hash(password),
+                loggedOut: false
             )
             try store.save(session)
             displayName = response.displayName
@@ -115,10 +112,38 @@ final class AuthSession: ObservableObject {
         }
     }
 
-    /// Cierra sesión: borra la sesión del dispositivo y vuelve a `signedOut`.
-    /// (Un logout deliberado sí exige reconexión para volver a entrar.)
+    /// Login sin conexión: verifica la contraseña contra el hash guardado en el
+    /// dispositivo. Permite volver a entrar offline incluso tras un logout.
+    private func offlineLogin(username: String, password: String) {
+        guard let cred = try? store.read() else {
+            loginFailure = .offlineNoSession
+            errorMessage = "Sin conexión. La primera vez necesitas conexión para iniciar sesión."
+            AppLog.auth.warning("login offline sin credencial")
+            return
+        }
+        guard cred.username == username, hasher.verify(password, cred.passwordHash) else {
+            loginFailure = .badCredentials
+            errorMessage = "Usuario o contraseña incorrectos."
+            AppLog.auth.warning("login offline: credencial no coincide")
+            return
+        }
+        // Reactiva la sesión guardada (mismo token; se validará al sincronizar online).
+        var updated = cred
+        updated.loggedOut = false
+        try? store.save(updated)
+        displayName = cred.displayName
+        self.username = cred.username
+        state = .signedIn
+        AppLog.auth.info("login offline verificado con contraseña")
+    }
+
+    /// Cierra sesión: la app vuelve al login, pero la credencial se conserva para poder
+    /// re-loguearse OFFLINE con la contraseña (offline-first, decisión aprobada).
     func logout() {
-        try? store.clear()
+        if var cred = try? store.read() {
+            cred.loggedOut = true
+            try? store.save(cred)
+        }
         displayName = nil
         username = nil
         needsReauth = false

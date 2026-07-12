@@ -9,6 +9,11 @@ struct StoredSession: Codable, Equatable, Sendable {
     var salespersonCode: String?
     /// Momento del último login ONLINE exitoso (hora del dispositivo).
     var lastOnlineLoginAt: Date
+    /// Hash de la contraseña para re-login OFFLINE (no se guarda la contraseña).
+    var passwordHash: PasswordHash
+    /// `true` tras un logout explícito: la sesión persiste (para re-login offline con
+    /// contraseña) pero la app arranca en el login, no directo.
+    var loggedOut: Bool = false
 }
 
 /// Almacenamiento de la sesión.
