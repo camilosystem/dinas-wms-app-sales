@@ -4,16 +4,18 @@ import SwiftUI
 /// Es la vista raíz que se muestra en la ventana.
 struct AuthGate: View {
     @EnvironmentObject private var environment: AppEnvironment
+    // Observa `auth` DIRECTAMENTE: es un ObservableObject anidado en AppEnvironment,
+    // así que sus cambios (state → signedIn) no llegarían vía `environment` solo.
+    @EnvironmentObject private var auth: AuthSession
     @EnvironmentObject private var network: NetworkMonitor
 
     var body: some View {
         Group {
-            switch environment.auth.state {
+            switch auth.state {
             case .unknown:
                 ProgressView()
             case .signedOut:
                 LoginView()
-                    .environmentObject(environment.auth)
             case .signedIn:
                 RootView()
                     .environmentObject(environment.pendingOrders)
@@ -24,6 +26,6 @@ struct AuthGate: View {
                 if !network.isOnline { OfflineBanner() }
             }
         }
-        .task { environment.auth.restore() }
+        .task { auth.restore() }
     }
 }
