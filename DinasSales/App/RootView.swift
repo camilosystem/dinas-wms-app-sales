@@ -24,12 +24,14 @@ struct RootView: View {
     }
 }
 
-/// Home: saludo, sincronización y cierre de sesión.
+/// Home: saludo, estado de conexión/sincronización, sincronizar y cerrar sesión.
 struct HomeView: View {
-    @EnvironmentObject private var environment: AppEnvironment
     @EnvironmentObject private var sync: SyncEngine
     @EnvironmentObject private var network: NetworkMonitor
     @EnvironmentObject private var pendingOrders: PendingOrdersObserver
+    @EnvironmentObject private var auth: AuthSession
+
+    @State private var showReauth = false
 
     var body: some View {
         NavigationStack {
@@ -43,6 +45,15 @@ struct HomeView: View {
                 Text(saludo)
                     .font(.title3.weight(.medium))
                     .multilineTextAlignment(.center)
+
+                // Estado persistente: modo offline / sesión expirada.
+                if !network.isOnline {
+                    statusBanner("Modo offline — trabajando con tus últimos datos",
+                                 systemImage: "wifi.slash", color: .orange)
+                }
+                if auth.needsReauth {
+                    reauthCallout
+                }
 
                 // Aviso persistente de pendientes: el vendedor es responsable de sincronizar.
                 if pendingOrders.count > 0 {
@@ -82,10 +93,43 @@ struct HomeView: View {
             .navigationTitle("Home")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Cerrar sesión") { environment.auth.logout() }
+                    Button("Cerrar sesión") { auth.logout() }
                 }
             }
+            .sheet(isPresented: $showReauth) {
+                NavigationStack { LoginView() }
+            }
+            // Cuando la re-autenticación online resuelve el token, cerramos la hoja.
+            .onChange(of: auth.needsReauth) { needs in
+                if !needs { showReauth = false }
+            }
         }
+    }
+
+    /// Aviso de sesión expirada: se puede seguir trabajando offline; para sincronizar
+    /// hay que reconectar la sesión.
+    private var reauthCallout: some View {
+        VStack(spacing: 8) {
+            statusBanner("Tu sesión expiró — reconéctate para sincronizar",
+                         systemImage: "person.crop.circle.badge.exclamationmark", color: .red)
+            Button("Reconectar sesión") { showReauth = true }
+                .buttonStyle(.bordered)
+                .disabled(!network.isOnline)
+        }
+    }
+
+    /// Franja de estado reutilizable.
+    private func statusBanner(_ text: String, systemImage: String, color: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+            Text(text).font(.callout.weight(.semibold)).multilineTextAlignment(.leading)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     /// Tarjeta naranja, visible, cuando hay órdenes confirmadas sin enviar.
@@ -105,16 +149,15 @@ struct HomeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Texto de estado de la última sincronización (o aviso de que no hay red).
+    /// Texto de la última sincronización (siempre visible; el estado offline va aparte).
     private var lastSyncText: String {
-        if !network.isOnline { return "Sin conexión — sincronización en pausa" }
         guard let date = sync.lastSyncedAt else { return "Nunca sincronizado" }
         let relative = date.formatted(.relative(presentation: .named))
         return "Última sincronización: \(relative)"
     }
 
     private var saludo: String {
-        if let name = environment.auth.displayName, !name.isEmpty {
+        if let name = auth.displayName, !name.isEmpty {
             return "Hola, \(name)"
         }
         return "Dinas — Vendedores"

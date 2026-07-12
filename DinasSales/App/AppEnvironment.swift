@@ -27,16 +27,16 @@ final class AppEnvironment: ObservableObject {
         }
         self.database = database
 
-        // El token del Keychain alimenta tanto al cliente HTTP (Authorization: Bearer)
-        // como a la sesión, para que ambos vean el mismo almacenamiento.
-        let tokenStore = KeychainTokenStore()
+        // La sesión (con el JWT) vive en el Keychain. El cliente HTTP toma el token de
+        // ahí para el Authorization: Bearer, y la sesión gobierna el acceso a la app.
+        let sessionStore = KeychainSessionStore()
         let api = APIClient(
             baseURL: AppConfig.middlewareBaseURL,
-            tokenProvider: { try? tokenStore.read() }
+            tokenProvider: { try? sessionStore.read()?.token }
         )
         self.api = api
 
-        let auth = AuthSession(api: api, store: tokenStore)
+        let auth = AuthSession(api: api, store: sessionStore)
         self.auth = auth
 
         // Un 401 durante la sincronización expira la sesión → la app vuelve al login.

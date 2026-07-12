@@ -440,7 +440,7 @@ final class SyncEngineTests: XCTestCase {
 
         // La reconexión es solo informativa: NO debe iniciar ninguna sincronización.
         XCTAssertEqual(api.postedUUIDs, [], "la reconexión no sube órdenes")
-        XCTAssertNil(api.lastCatalogSince, "la reconexión no baja catálogo")
+        XCTAssertTrue(api.lastCatalogSince == nil, "la reconexión no baja catálogo")
         XCTAssertFalse(engine.isSyncing)
         XCTAssertNil(engine.feedback, "no hubo sincronización, no hay feedback")
     }

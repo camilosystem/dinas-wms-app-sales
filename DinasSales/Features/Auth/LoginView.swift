@@ -4,6 +4,7 @@ import SwiftUI
 /// Al autenticar, el JWT se guarda en Keychain (vía `AuthSession`).
 struct LoginView: View {
     @EnvironmentObject private var auth: AuthSession
+    @EnvironmentObject private var network: NetworkMonitor
 
     @State private var username = ""
     @State private var password = ""
@@ -39,7 +40,10 @@ struct LoginView: View {
 
                 Section {
                     Button {
-                        Task { await auth.login(username: username, password: password) }
+                        Task {
+                            await auth.login(username: username, password: password,
+                                             isOnline: network.isOnline)
+                        }
                     } label: {
                         HStack {
                             Spacer()

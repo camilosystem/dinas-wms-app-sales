@@ -19,7 +19,9 @@ struct KeychainStore {
         SecItemDelete(query as CFDictionary)
 
         query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        // Accesible tras el primer desbloqueo (sobrevive reinicios, sirve offline) y
+        // ligado a ESTE dispositivo (no se sincroniza a iCloud Keychain).
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else { throw KeychainError.unhandled(status) }

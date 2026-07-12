@@ -72,6 +72,10 @@ final class SyncEngine: ObservableObject {
         } catch APIError.unauthorized {
             AppLog.sync.warning("sync: 401 no autorizado → re-login")
             onUnauthorized()
+            feedback = SyncFeedback(
+                message: "Tu sesión expiró. Reconéctate para sincronizar; tus órdenes siguen guardadas.",
+                isError: true
+            )
         } catch {
             AppLog.sync.error("sync falló: \(String(describing: error), privacy: .public)")
             feedback = SyncFeedback(
@@ -114,6 +118,8 @@ final class SyncEngine: ObservableObject {
         } catch APIError.unauthorized {
             AppLog.sync.warning("bajada: 401 no autorizado → re-login")
             onUnauthorized()
+            feedback = SyncFeedback(message: "Tu sesión expiró. Reconéctate para sincronizar.",
+                                    isError: true)
         } catch {
             AppLog.sync.error("bajada falló: \(String(describing: error), privacy: .public)")
             feedback = SyncFeedback(message: "No se pudo sincronizar. Revisa la conexión.",
