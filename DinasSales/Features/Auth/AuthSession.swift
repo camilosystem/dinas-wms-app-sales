@@ -72,7 +72,7 @@ final class AuthSession: ObservableObject {
         defer { isAuthenticating = false }
 
         guard isOnline else {
-            offlineLogin(username: username, password: password)
+            tryOfflineLogin(username: username, password: password, serverUnreachable: false)
             return
         }
 
@@ -94,30 +94,32 @@ final class AuthSession: ObservableObject {
             state = .signedIn
             AppLog.auth.info("login exitoso")
         } catch APIError.unauthorized {
+            // El servidor respondió que las credenciales son inválidas: NO caer a offline.
             loginFailure = .badCredentials
             errorMessage = "Usuario o contraseña incorrectos."
             AppLog.auth.warning("login: credenciales inválidas")
-        } catch APIError.missingBaseURL {
-            loginFailure = .serverError
-            errorMessage = "Falta configurar la URL del middleware."
-            AppLog.auth.error("login: falta MIDDLEWARE_BASE_URL")
         } catch APIError.server(let status) {
+            // El servidor es alcanzable pero erró: tampoco caemos a offline.
             loginFailure = .serverError
             errorMessage = "El servidor no responde (\(status)). Intenta más tarde."
             AppLog.auth.error("login: server \(status, privacy: .public)")
         } catch {
-            loginFailure = .connectionError
-            errorMessage = "No se pudo conectar con el servidor. Intenta de nuevo."
-            AppLog.auth.error("login: error \(String(describing: error), privacy: .public)")
+            // No se pudo ALCANZAR el servidor (timeout, red caída, URL faltante) → se
+            // intenta la verificación OFFLINE con el hash guardado.
+            AppLog.auth.warning("login: servidor inalcanzable → intento offline")
+            tryOfflineLogin(username: username, password: password, serverUnreachable: true)
         }
     }
 
-    /// Login sin conexión: verifica la contraseña contra el hash guardado en el
-    /// dispositivo. Permite volver a entrar offline incluso tras un logout.
-    private func offlineLogin(username: String, password: String) {
+    /// Verifica la contraseña contra el hash guardado en el dispositivo y entra offline.
+    /// Se usa tanto sin red como cuando el login online no pudo alcanzar el servidor
+    /// (`serverUnreachable`), que solo cambia el mensaje si no hay credencial.
+    private func tryOfflineLogin(username: String, password: String, serverUnreachable: Bool) {
         guard let cred = try? store.read() else {
-            loginFailure = .offlineNoSession
-            errorMessage = "Sin conexión. La primera vez necesitas conexión para iniciar sesión."
+            loginFailure = serverUnreachable ? .connectionError : .offlineNoSession
+            errorMessage = serverUnreachable
+                ? "No se pudo conectar con el servidor. La primera vez necesitas conexión."
+                : "Sin conexión. La primera vez necesitas conexión para iniciar sesión."
             AppLog.auth.warning("login offline sin credencial")
             return
         }
@@ -134,7 +136,7 @@ final class AuthSession: ObservableObject {
         displayName = cred.displayName
         self.username = cred.username
         state = .signedIn
-        AppLog.auth.info("login offline verificado con contraseña")
+        AppLog.auth.info("login verificado offline con contraseña")
     }
 
     /// Cierra sesión: la app vuelve al login, pero la credencial se conserva para poder

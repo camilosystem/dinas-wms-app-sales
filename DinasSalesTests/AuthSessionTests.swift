@@ -1,11 +1,12 @@
 import XCTest
 @testable import DinasSales
 
-/// Stub de la API de auth: no toca la red.
-private struct StubAuthAPI: AuthAPI {
-    var result: Result<LoginResponse, APIError>
+/// Stub de la API de auth: no toca la red. Puede fallar con cualquier error (incluido
+/// uno de red) para simular un servidor inalcanzable.
+private struct StubAuthAPI: AuthAPI, @unchecked Sendable {
+    var result: Result<LoginResponse, any Error>
 
-    init(result: Result<LoginResponse, APIError>) { self.result = result }
+    init(result: Result<LoginResponse, any Error>) { self.result = result }
 
     init(token: String, displayName: String? = nil) {
         self.result = .success(LoginResponse(token: token, salespersonCode: nil,
@@ -77,7 +78,7 @@ final class AuthSessionTests: XCTestCase {
 
     func test_login_online_credencialesIncorrectas_mensajeExplicito() async throws {
         let store = InMemorySessionStore()
-        let auth = makeAuth(api: StubAuthAPI(result: .failure(.unauthorized)), store: store)
+        let auth = makeAuth(api: StubAuthAPI(result: .failure(APIError.unauthorized)), store: store)
         auth.restore()
 
         await auth.login(username: "vendedor1", password: "mala", isOnline: true)
@@ -89,7 +90,7 @@ final class AuthSessionTests: XCTestCase {
     }
 
     func test_login_online_errorDeServidor_distinguido() async throws {
-        let auth = makeAuth(api: StubAuthAPI(result: .failure(.server(status: 500))),
+        let auth = makeAuth(api: StubAuthAPI(result: .failure(APIError.server(status: 500))),
                             store: InMemorySessionStore())
         auth.restore()
         await auth.login(username: "vendedor1", password: "x", isOnline: true)
@@ -215,5 +216,32 @@ final class AuthSessionTests: XCTestCase {
         try repo.confirm(orderUUID: order.clientUUID)
 
         XCTAssertEqual(try repo.confirmedOrders().map(\.clientUUID), ["ORD-1"])
+    }
+
+    // MARK: - Servidor inalcanzable con red activa (middleware caído) → fallback offline
+
+    func test_login_servidorInalcanzable_caeAOfflineConPasswordCorrecta() async throws {
+        // Hay red (isOnline: true), pero el POST falla por timeout (middleware caído).
+        let auth = makeAuth(api: StubAuthAPI(result: .failure(URLError(.timedOut))),
+                            store: InMemorySessionStore(session: sampleSession(password: "secreta",
+                                                                              loggedOut: true)))
+        auth.restore()
+
+        await auth.login(username: "vendedor1", password: "secreta", isOnline: true)
+
+        XCTAssertEqual(auth.state, .signedIn, "cae a verificación offline con el hash")
+        XCTAssertNil(auth.loginFailure)
+    }
+
+    func test_login_servidorInalcanzable_passwordMala_noEntra() async throws {
+        let auth = makeAuth(api: StubAuthAPI(result: .failure(URLError(.timedOut))),
+                            store: InMemorySessionStore(session: sampleSession(password: "secreta",
+                                                                              loggedOut: true)))
+        auth.restore()
+
+        await auth.login(username: "vendedor1", password: "MALA", isOnline: true)
+
+        XCTAssertEqual(auth.state, .signedOut)
+        XCTAssertEqual(auth.loginFailure, .badCredentials)
     }
 }

@@ -101,6 +101,9 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
+        // Timeout corto: si el middleware no responde, fallar rápido (p. ej. para caer al
+        // login offline) en vez de colgarse ~60s con el valor por defecto.
+        request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
             request.httpBody = body

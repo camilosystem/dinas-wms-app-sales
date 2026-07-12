@@ -72,7 +72,9 @@
       "Bash(curl -sS -m 5 -o /dev/null -w \"status: %{http_code}  tiempo: %{time_total}s\\\\n\" http://192.168.1.33:5257/v1/sync/catalog)",
       "Bash(ping -c 2 -t 3 192.168.1.33)",
       "Bash(ipconfig getifaddr *)",
-      "Bash(git commit -q -m 'feat\\(auth\\): re-login offline con contrasena tras logout \\(Opcion C\\) *)"
+      "Bash(git commit -q -m 'feat\\(auth\\): re-login offline con contrasena tras logout \\(Opcion C\\) *)",
+      "Bash(perl -0pi -e 's/StubAuthAPI\\\\\\(result: \\\\.failure\\\\\\(\\\\.unauthorized\\\\\\)\\\\\\)/StubAuthAPI\\(result: .failure\\(APIError.unauthorized\\)\\)/g; s/StubAuthAPI\\\\\\(result: \\\\.failure\\\\\\(\\\\.server\\\\\\(status: 500\\\\\\)\\\\\\)\\\\\\)/StubAuthAPI\\(result: .failure\\(APIError.server\\(status: 500\\)\\)\\)/g' DinasSalesTests/AuthSessionTests.swift)",
+      "Bash(git commit -q -m 'fix\\(auth\\): fallback offline si el servidor no responde + timeout corto *)"
     ]
   }
 }
