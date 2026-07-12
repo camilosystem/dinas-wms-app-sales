@@ -71,6 +71,7 @@ end
 # Info.plist por ambiente (INFOPLIST_FILE lo elige cada .xcconfig). Solo referencias.
 app_group.new_file(File.join(ROOT, 'DinasSales', 'Resources', 'Info.plist'))
 app_group.new_file(File.join(ROOT, 'DinasSales', 'Resources', 'Info-Dev.plist'))
+app_group.new_file(File.join(ROOT, 'DinasSales', 'Resources', 'DinasSales.entitlements'))
 
 # Asset catalog (icono de la app) como recurso.
 assets_ref = app_group.new_file(File.join(ROOT, 'DinasSales', 'Resources', 'Assets.xcassets'))
@@ -90,6 +91,7 @@ app.build_configurations.each do |config|
   s['CURRENT_PROJECT_VERSION'] = '1'
   s['GENERATE_INFOPLIST_FILE'] = 'NO'
   # INFOPLIST_FILE llega del .xcconfig (Info.plist en Prod/Staging; Info-Dev.plist en Dev).
+  s['CODE_SIGN_ENTITLEMENTS'] = 'DinasSales/Resources/DinasSales.entitlements'
   s['IPHONEOS_DEPLOYMENT_TARGET'] = DEPLOYMENT_TARGET
   s['TARGETED_DEVICE_FAMILY'] = '1,2'          # iPhone + iPad (universal)
   s['SWIFT_VERSION'] = '5.0'

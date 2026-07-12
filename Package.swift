@@ -30,6 +30,7 @@ let package = Package(
             exclude: [
                 "Resources/Info.plist",
                 "Resources/Info-Dev.plist",
+                "Resources/DinasSales.entitlements",
                 "Resources/Assets.xcassets"
             ]
         ),
