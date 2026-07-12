@@ -7,6 +7,9 @@ struct OrderSummary: Identifiable, Equatable {
     let clientName: String
     let itemCount: Int
     let total: Double
+    /// Confirmada pero sin enviar por más de 7 días. Es una marca CALCULADA (no altera
+    /// datos): el pedido se conserva; el vendedor decide si lo descarta o lo envía.
+    let isOverdue: Bool
 
     var id: String { order.clientUUID }
 }
@@ -21,6 +24,15 @@ struct OrdersRepository {
     /// Inyectables para tests deterministas.
     var now: () -> Date = Date.init
     var makeUUID: () -> String = { UUID().uuidString }
+
+    /// Antigüedad tras la cual una orden confirmada sin enviar se considera "vencida".
+    static let overdueAge: TimeInterval = 7 * 24 * 60 * 60
+
+    /// ¿La orden está confirmada y lleva más de 7 días sin enviarse? (marca calculada)
+    func isOverdue(_ order: Order) -> Bool {
+        guard order.status == .confirmed, let takenAt = order.takenAt else { return false }
+        return now().timeIntervalSince(takenAt) > Self.overdueAge
+    }
 
     // MARK: - Ciclo de la orden
 
@@ -84,6 +96,17 @@ struct OrdersRepository {
         try database.dbQueue.write { db in
             guard let order = try Order.fetchOne(db, key: orderUUID) else { return }
             guard order.status == .draft else { throw OrdersError.notADraft }
+            try order.delete(db)
+        }
+    }
+
+    /// Descarta (elimina) una orden NO sincronizada. Es una acción EXPLÍCITA del usuario;
+    /// ningún temporizador ni caducidad la invoca. Las sincronizadas son registros y no
+    /// se pueden descartar desde aquí.
+    func discardOrder(orderUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard let order = try Order.fetchOne(db, key: orderUUID) else { return }
+            guard order.status != .synced else { throw OrdersError.cannotDiscardSynced }
             try order.delete(db)
         }
     }
@@ -187,7 +210,8 @@ struct OrdersRepository {
                     order: order,
                     clientName: clientName,
                     itemCount: lines.count,
-                    total: Self.total(of: lines)
+                    total: Self.total(of: lines),
+                    isOverdue: isOverdue(order)
                 )
             }
         }
@@ -211,5 +235,6 @@ enum OrdersError: Error, Equatable {
     case notADraft
     case emptyOrder
     case itemNotFound
-    case itemNotOrderable   // ítem sin precio de lista (price = null): dato ausente
+    case itemNotOrderable    // ítem sin precio de lista (price = null): dato ausente
+    case cannotDiscardSynced // no se descarta una orden ya sincronizada (es un registro)
 }

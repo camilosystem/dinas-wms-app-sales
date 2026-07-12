@@ -9,10 +9,12 @@ struct OrdersView: View {
     @State private var path: [OrderRoute] = []
     @State private var showClientPicker = false
     @State private var loadError = false
-    @State private var draftToDelete: OrderSummary?
+    @State private var orderToDiscard: OrderSummary?
 
     private var ordersRepo: OrdersRepository { OrdersRepository(database: environment.database) }
     private var clientsRepo: ClientsRepository { ClientsRepository(database: environment.database) }
+
+    private var overdueCount: Int { summaries.filter(\.isOverdue).count }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -24,7 +26,10 @@ struct OrdersView: View {
                         systemImage: "cart"
                     )
                 } else {
-                    list
+                    VStack(spacing: 0) {
+                        if overdueCount > 0 { overdueBanner }
+                        list
+                    }
                 }
             }
             .navigationTitle("Órdenes")
@@ -56,37 +61,68 @@ struct OrdersView: View {
         }
     }
 
+    /// Aviso rojo: hay pedidos vencidos (>7 días sin enviar). El vendedor decide qué hacer.
+    private var overdueBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "clock.badge.exclamationmark")
+            Text(overdueCount == 1
+                 ? "Tienes 1 pedido vencido (más de 7 días sin enviar)"
+                 : "Tienes \(overdueCount) pedidos vencidos (más de 7 días sin enviar)")
+                .font(.callout.weight(.semibold))
+            Spacer()
+        }
+        .foregroundStyle(.red)
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(Color.red.opacity(0.1))
+    }
+
     private var list: some View {
         List {
             ForEach(summaries) { summary in
                 NavigationLink(value: route(for: summary.order)) {
                     OrderRow(summary: summary)
                 }
+                // Descartar: borradores y vencidos (acción explícita). Las confirmadas
+                // recientes y las sincronizadas NO se descartan desde aquí.
                 .swipeActions(edge: .trailing) {
-                    // Solo los borradores se pueden descartar; confirmadas/sincronizadas
-                    // son registros que no se borran desde la app.
-                    if summary.order.status == .draft {
+                    if summary.order.status == .draft || summary.isOverdue {
                         Button(role: .destructive) {
-                            draftToDelete = summary
+                            orderToDiscard = summary
                         } label: {
                             Label("Descartar", systemImage: "trash")
                         }
                     }
                 }
+                // Enviar un vencido "igual": viaja con su taken_at real.
+                .swipeActions(edge: .leading) {
+                    if summary.isOverdue {
+                        Button { sendOverdue(summary) } label: {
+                            Label("Enviar", systemImage: "paperplane")
+                        }
+                        .tint(.blue)
+                    }
+                }
             }
         }
         .confirmationDialog(
-            "¿Descartar este borrador?",
-            isPresented: Binding(get: { draftToDelete != nil },
-                                 set: { if !$0 { draftToDelete = nil } }),
+            discardTitle,
+            isPresented: Binding(get: { orderToDiscard != nil },
+                                 set: { if !$0 { orderToDiscard = nil } }),
             titleVisibility: .visible,
-            presenting: draftToDelete
+            presenting: orderToDiscard
         ) { summary in
-            Button("Descartar borrador", role: .destructive) { deleteDraft(summary) }
-            Button("Cancelar", role: .cancel) { draftToDelete = nil }
-        } message: { _ in
-            Text("Se eliminará la orden y sus líneas. Esta acción no se puede deshacer.")
+            Button("Descartar", role: .destructive) { discard(summary) }
+            Button("Cancelar", role: .cancel) { orderToDiscard = nil }
+        } message: { summary in
+            Text(summary.isOverdue
+                 ? "Se eliminará este pedido vencido y no se enviará. Esta acción no se puede deshacer."
+                 : "Se eliminará la orden y sus líneas. Esta acción no se puede deshacer.")
         }
+    }
+
+    private var discardTitle: String {
+        (orderToDiscard?.isOverdue ?? false) ? "¿Descartar este pedido vencido?" : "¿Descartar este borrador?"
     }
 
     // MARK: - Navegación
@@ -126,14 +162,24 @@ struct OrdersView: View {
         }
     }
 
-    private func deleteDraft(_ summary: OrderSummary) {
+    /// Descarte EXPLÍCITO (borrador o vencido). Nunca automático.
+    private func discard(_ summary: OrderSummary) {
         do {
-            try ordersRepo.deleteDraft(orderUUID: summary.order.clientUUID)
+            try ordersRepo.discardOrder(orderUUID: summary.order.clientUUID)
         } catch {
             loadError = true
         }
-        draftToDelete = nil
+        orderToDiscard = nil
         reload()
+    }
+
+    /// Envía un vencido "igual" (con su taken_at real). La decisión de qué hacer con un
+    /// pedido viejo se toma del lado del servidor.
+    private func sendOverdue(_ summary: OrderSummary) {
+        Task {
+            await environment.sync.pushOrder(summary.order)
+            reload()
+        }
     }
 
     private func reload() {
@@ -171,7 +217,17 @@ private struct OrderRow: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            OrderStatusBadge(status: summary.order.status)
+            VStack(alignment: .trailing, spacing: 4) {
+                OrderStatusBadge(status: summary.order.status)
+                if summary.isOverdue {
+                    Text("Vencido")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.red.opacity(0.15))
+                        .foregroundStyle(.red)
+                        .clipShape(Capsule())
+                }
+            }
         }
     }
 }

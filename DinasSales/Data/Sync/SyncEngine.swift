@@ -178,6 +178,23 @@ final class SyncEngine: ObservableObject {
         return failed
     }
 
+    /// Sube UNA orden confirmada (p. ej. un vencido que el vendedor decide enviar). Viaja
+    /// con su `taken_at` original. Devuelve `true` si se sincronizó.
+    @discardableResult
+    func pushOrder(_ order: Order) async -> Bool {
+        let repo = ordersRepo
+        do {
+            let lines = try repo.lines(orderUUID: order.clientUUID)
+            let accepted = try await api.postOrder(order, lines: lines)
+            try repo.markSynced(orderUUID: order.clientUUID, orderNumber: accepted.orderNumber)
+            AppLog.sync.info("orden \(order.clientUUID, privacy: .public) enviada (individual)")
+            return true
+        } catch {
+            AppLog.sync.error("orden \(order.clientUUID, privacy: .public) no se pudo enviar: \(String(describing: error), privacy: .public)")
+            return false
+        }
+    }
+
     // MARK: - Bajada
 
     /// Descarga el delta de catálogo desde la última marca y lo persiste (upsert).

@@ -5,6 +5,7 @@ import os
 enum LoginFailure: Equatable {
     case badCredentials     // 401: usuario/contraseña incorrectos
     case offlineNoSession   // sin red y sin sesión previa en el dispositivo
+    case offlineExpired     // >7 días sin login online: se exige autenticación online
     case serverError        // 5xx / configuración
     case connectionError    // la red falló pese a estar "online"
 }
@@ -33,10 +34,18 @@ final class AuthSession: ObservableObject {
     @Published private(set) var loginFailure: LoginFailure?
     @Published var errorMessage: String?
 
+    /// Máxima antigüedad del último login ONLINE para seguir permitiendo login offline.
+    /// Pasados 7 días sin autenticación online, se exige volver a autenticarse online.
+    static let offlineSessionMaxAge: TimeInterval = 7 * 24 * 60 * 60
+
     private let api: AuthAPI
     private let store: SessionStore
     private let hasher: PasswordHashing
     private let now: () -> Date
+
+    private func isOfflineExpired(_ session: StoredSession) -> Bool {
+        now().timeIntervalSince(session.lastOnlineLoginAt) > Self.offlineSessionMaxAge
+    }
 
     init(api: AuthAPI, store: SessionStore,
          hasher: PasswordHashing = PBKDF2Hasher(),
@@ -52,12 +61,21 @@ final class AuthSession: ObservableObject {
     /// siga guardada para re-login offline).
     func restore() {
         do {
-            if let session = try store.read(), !session.loggedOut {
+            guard let session = try store.read(), !session.loggedOut else {
+                state = .signedOut
+                return
+            }
+            if isOfflineExpired(session) {
+                // Caducó la ventana offline: se exige login online. Los datos y pedidos
+                // locales NO se tocan.
+                loginFailure = .offlineExpired
+                errorMessage = "Tu sesión offline expiró. Conéctate para continuar."
+                state = .signedOut
+                AppLog.auth.warning("sesión offline caducada (>7 días sin login online)")
+            } else {
                 displayName = session.displayName
                 username = session.username
                 state = .signedIn
-            } else {
-                state = .signedOut
             }
         } catch {
             state = .signedOut
@@ -121,6 +139,12 @@ final class AuthSession: ObservableObject {
                 ? "No se pudo conectar con el servidor. La primera vez necesitas conexión."
                 : "Sin conexión. La primera vez necesitas conexión para iniciar sesión."
             AppLog.auth.warning("login offline sin credencial")
+            return
+        }
+        guard !isOfflineExpired(cred) else {
+            loginFailure = .offlineExpired
+            errorMessage = "Tu sesión offline expiró. Conéctate para continuar."
+            AppLog.auth.warning("login offline rechazado: sesión caducada (>7 días)")
             return
         }
         guard cred.username == username, hasher.verify(password, cred.passwordHash) else {

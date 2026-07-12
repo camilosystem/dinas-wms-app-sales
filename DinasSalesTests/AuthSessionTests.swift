@@ -218,6 +218,56 @@ final class AuthSessionTests: XCTestCase {
         XCTAssertEqual(try repo.confirmedOrders().map(\.clientUUID), ["ORD-1"])
     }
 
+    // MARK: - Caducidad de la sesión offline (7 días)
+
+    /// "Ahora" fijo y una sesión cuyo último login online fue hace `daysAgo` días.
+    private let fixedNow = Date(timeIntervalSince1970: 10_000_000)
+    private func sessionDaysAgo(_ daysAgo: Double, password: String = "secreta",
+                               loggedOut: Bool = true) -> StoredSession {
+        StoredSession(token: "jwt-previo", username: "vendedor1", displayName: "Vendedor Uno",
+                      salespersonCode: "V1",
+                      lastOnlineLoginAt: fixedNow.addingTimeInterval(-daysAgo * 24 * 3600),
+                      passwordHash: try! hasher.hash(password), loggedOut: loggedOut)
+    }
+    private func authAtFixedNow(store: SessionStore, api: AuthAPI = StubAuthAPI(token: "t")) -> AuthSession {
+        AuthSession(api: api, store: store, hasher: hasher, now: { self.fixedNow })
+    }
+
+    func test_loginOffline_6dias_funciona() async {
+        let auth = authAtFixedNow(store: InMemorySessionStore(session: sessionDaysAgo(6)))
+        auth.restore()
+        await auth.login(username: "vendedor1", password: "secreta", isOnline: false)
+        XCTAssertEqual(auth.state, .signedIn, "6 días < 7: el login offline funciona")
+    }
+
+    func test_loginOffline_8dias_rechazadoConMensaje() async {
+        let auth = authAtFixedNow(store: InMemorySessionStore(session: sessionDaysAgo(8)))
+        auth.restore()
+        await auth.login(username: "vendedor1", password: "secreta", isOnline: false)
+        XCTAssertEqual(auth.state, .signedOut)
+        XCTAssertEqual(auth.loginFailure, .offlineExpired)
+        XCTAssertEqual(auth.errorMessage, "Tu sesión offline expiró. Conéctate para continuar.")
+    }
+
+    func test_restore_sesionActivaCaducada_exigeLoginOnline() {
+        let auth = authAtFixedNow(store: InMemorySessionStore(session: sessionDaysAgo(8, loggedOut: false)))
+        auth.restore()
+        XCTAssertEqual(auth.state, .signedOut)
+        XCTAssertEqual(auth.loginFailure, .offlineExpired)
+    }
+
+    func test_loginOnline_renuevaContador() async throws {
+        // Sesión vieja (8 días) → un login online la renueva a "ahora".
+        let store = InMemorySessionStore(session: sessionDaysAgo(8))
+        let auth = authAtFixedNow(store: store, api: StubAuthAPI(token: "nuevo"))
+
+        await auth.login(username: "vendedor1", password: "secreta", isOnline: true)
+
+        XCTAssertEqual(auth.state, .signedIn)
+        XCTAssertEqual(try store.read()?.lastOnlineLoginAt, fixedNow,
+                       "el login online reinicia el contador de 7 días")
+    }
+
     // MARK: - Servidor inalcanzable con red activa (middleware caído) → fallback offline
 
     func test_login_servidorInalcanzable_caeAOfflineConPasswordCorrecta() async throws {

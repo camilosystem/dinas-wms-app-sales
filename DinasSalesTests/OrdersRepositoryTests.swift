@@ -228,4 +228,64 @@ final class OrdersRepositoryTests: XCTestCase {
         }
         XCTAssertTrue(try repo.lines(orderUUID: order.clientUUID).isEmpty, "no se creó línea")
     }
+
+    // MARK: - Pedidos vencidos (>7 días sin enviar) — nunca se borran solos
+
+    private let ahora = Date(timeIntervalSince1970: 10_000_000)
+
+    /// Crea y confirma una orden con `takenAt` = ahora − `daysAgo` días.
+    @discardableResult
+    private func confirmedOrder(_ db: AppDatabase, uuid: String, daysAgo: Double) throws -> String {
+        let taken = ahora.addingTimeInterval(-daysAgo * 24 * 3600)
+        let creator = OrdersRepository(database: db, now: { taken }, makeUUID: { uuid })
+        let order = try creator.startOrder(clientCode: "C1")
+        try creator.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 1)
+        try creator.confirm(orderUUID: order.clientUUID)
+        return order.clientUUID
+    }
+
+    func test_confirmadaMasDe7dias_seMarcaVencida_yPersiste() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try confirmedOrder(db, uuid: "ORD-1", daysAgo: 8)   // vencida
+        try confirmedOrder(db, uuid: "ORD-2", daysAgo: 3)   // reciente
+        let repo = OrdersRepository(database: db, now: { self.ahora })
+
+        let summaries = try repo.summaries()
+        let byId = Dictionary(uniqueKeysWithValues: summaries.map { ($0.id, $0) })
+        XCTAssertEqual(byId["ORD-1"]?.isOverdue, true, "8 días → vencida")
+        XCTAssertEqual(byId["ORD-2"]?.isOverdue, false, "3 días → no vencida")
+        // Y ambas SIGUEN existiendo: marcar vencida no borra nada.
+        XCTAssertEqual(try repo.confirmedOrders().count, 2)
+    }
+
+    func test_vencida_sePuedeDescartar_soloConAccionExplicita() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try confirmedOrder(db, uuid: "ORD-1", daysAgo: 10)
+        let repo = OrdersRepository(database: db, now: { self.ahora })
+
+        // Leer/marcar vencida NO borra.
+        _ = try repo.summaries()
+        _ = try repo.confirmedOrders()
+        XCTAssertEqual(try repo.confirmedOrders().count, 1, "leer no borra")
+
+        // Solo el descarte EXPLÍCITO la elimina.
+        try repo.discardOrder(orderUUID: "ORD-1")
+        XCTAssertNil(try repo.order(uuid: "ORD-1"))
+        XCTAssertTrue(try repo.confirmedOrders().isEmpty)
+    }
+
+    func test_discardOrder_noBorraSincronizadas() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try confirmedOrder(db, uuid: "ORD-1", daysAgo: 10)
+        let repo = OrdersRepository(database: db, now: { self.ahora })
+        try repo.markSynced(orderUUID: "ORD-1", orderNumber: "N-1")
+
+        XCTAssertThrowsError(try repo.discardOrder(orderUUID: "ORD-1")) { error in
+            XCTAssertEqual(error as? OrdersError, .cannotDiscardSynced)
+        }
+        XCTAssertNotNil(try repo.order(uuid: "ORD-1"), "una sincronizada es un registro; no se borra")
+    }
 }

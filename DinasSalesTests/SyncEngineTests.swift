@@ -13,6 +13,8 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
 
     /// UUIDs de órdenes que recibió `postOrder` (para verificar reintentos).
     private(set) var postedUUIDs: [String] = []
+    /// `taken_at` recibido por UUID (para verificar que viaja el original).
+    private(set) var postedTakenAt: [String: Date?] = [:]
     /// Si es no-nil, `postOrder` lanza ese error.
     var postError: Error?
     /// Si es no-nil, `fetchCatalog`/`fetchClients` lanzan ese error.
@@ -39,6 +41,7 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
     func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO {
         if let postError { throw postError }
         postedUUIDs.append(order.clientUUID)
+        postedTakenAt[order.clientUUID] = order.takenAt
         return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: "N-\(postedUUIDs.count)",
                                 status: "SINCRONIZADA", receivedAt: nil)
     }
@@ -265,6 +268,34 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(api.postedUUIDs, ["ORD-0"], "la orden a total cero se envía igual")
         let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-0") }
         XCTAssertEqual(order?.status, .synced)
+    }
+
+    func test_pushOrder_vencido_conservaTakenAtOriginal() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try await db.dbQueue.write { database in
+            try Client(clientCode: "C1", name: "Tienda", address: nil, city: nil, zipcode: nil,
+                       managerName: nil, shippingRoute: nil).insert(database)
+            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil, comments: nil,
+                     price: 10, stock: nil, available: 5, imageURL: nil, active: true).insert(database)
+        }
+        // Orden confirmada hace 8 días (vencida): su taken_at es esa fecha real.
+        let takenAt = Date(timeIntervalSince1970: 1_000)
+        let creator = OrdersRepository(database: db, now: { takenAt }, makeUUID: { "ORD-1" })
+        let order = try creator.startOrder(clientCode: "C1")
+        try creator.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
+        try creator.confirm(orderUUID: order.clientUUID)
+        let confirmed = try creator.order(uuid: "ORD-1")!
+
+        let api = StubSyncAPI()
+        let engine = SyncEngine(database: db, api: api)
+
+        // El vendedor decide enviarlo igual → viaja con su taken_at ORIGINAL.
+        let ok = await engine.pushOrder(confirmed)
+
+        XCTAssertTrue(ok)
+        XCTAssertEqual(api.postedTakenAt["ORD-1"], takenAt, "el taken_at original viaja intacto")
+        let synced = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(synced?.status, .synced)
     }
 
     // MARK: - Idempotencia end-to-end (servidor simulado)

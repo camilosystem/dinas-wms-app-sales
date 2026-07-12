@@ -74,7 +74,8 @@
       "Bash(ipconfig getifaddr *)",
       "Bash(git commit -q -m 'feat\\(auth\\): re-login offline con contrasena tras logout \\(Opcion C\\) *)",
       "Bash(perl -0pi -e 's/StubAuthAPI\\\\\\(result: \\\\.failure\\\\\\(\\\\.unauthorized\\\\\\)\\\\\\)/StubAuthAPI\\(result: .failure\\(APIError.unauthorized\\)\\)/g; s/StubAuthAPI\\\\\\(result: \\\\.failure\\\\\\(\\\\.server\\\\\\(status: 500\\\\\\)\\\\\\)\\\\\\)/StubAuthAPI\\(result: .failure\\(APIError.server\\(status: 500\\)\\)\\)/g' DinasSalesTests/AuthSessionTests.swift)",
-      "Bash(git commit -q -m 'fix\\(auth\\): fallback offline si el servidor no responde + timeout corto *)"
+      "Bash(git commit -q -m 'fix\\(auth\\): fallback offline si el servidor no responde + timeout corto *)",
+      "Bash(git commit -q -m 'feat\\(auth+orders\\): caducidad offline 7 dias + pedidos vencidos \\(nunca se borran\\) *)"
     ]
   }
 }
