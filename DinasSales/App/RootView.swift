@@ -29,6 +29,7 @@ struct HomeView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @EnvironmentObject private var sync: SyncEngine
     @EnvironmentObject private var network: NetworkMonitor
+    @EnvironmentObject private var pendingOrders: PendingOrdersObserver
 
     var body: some View {
         NavigationStack {
@@ -43,10 +44,15 @@ struct HomeView: View {
                     .font(.title3.weight(.medium))
                     .multilineTextAlignment(.center)
 
-                if let error = sync.lastError {
-                    Text(error)
+                // Aviso persistente de pendientes: el vendedor es responsable de sincronizar.
+                if pendingOrders.count > 0 {
+                    pendingCallout
+                }
+
+                if let feedback = sync.feedback {
+                    Text(feedback.message)
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(feedback.isError ? .red : .green)
                         .multilineTextAlignment(.center)
                 }
 
@@ -80,6 +86,23 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// Tarjeta naranja, visible, cuando hay órdenes confirmadas sin enviar.
+    private var pendingCallout: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+            Text(pendingOrders.count == 1
+                 ? "Tienes 1 orden sin enviar"
+                 : "Tienes \(pendingOrders.count) órdenes sin enviar")
+                .font(.callout.weight(.semibold))
+        }
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     /// Texto de estado de la última sincronización (o aviso de que no hay red).

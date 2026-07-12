@@ -65,7 +65,9 @@
       "Bash(git commit -q -m 'config\\(dev\\): apuntar Dev al middleware local + excepcion ATS solo en Dev *)",
       "Bash(open -a Simulator)",
       "Bash(xcodebuild -showBuildSettings -project DinasSales.xcodeproj -scheme DinasSales -configuration Debug -destination id=__TRACKED_VAR__)",
-      "Bash(git commit -q -m 'fix\\(auth\\): entitlements de Keychain \\(arregla errSecMissingEntitlement -34018\\) *)"
+      "Bash(git commit -q -m 'fix\\(auth\\): entitlements de Keychain \\(arregla errSecMissingEntitlement -34018\\) *)",
+      "Bash(git commit -q -m 'fix\\(auth\\): AuthGate observa auth directamente \\(login no navegaba\\) *)",
+      "Bash(git commit -q -m 'feat\\(sync\\): sincronizacion siempre manual + feedback y pendientes visibles *)"
     ]
   }
 }

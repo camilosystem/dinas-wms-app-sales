@@ -46,12 +46,8 @@ final class AppEnvironment: ObservableObject {
 
         self.pendingOrders = PendingOrdersObserver(database: database)
 
-        // Auto-sync al recuperar la red, solo si hay sesión activa.
-        let network = NetworkMonitor()
-        network.onReconnect = { [weak auth, weak sync] in
-            guard let auth, let sync, auth.state == .signedIn else { return }
-            Task { await sync.sync() }
-        }
-        self.network = network
+        // El monitor de red es SOLO informativo (banner offline). La sincronización es
+        // siempre manual, disparada por el vendedor — no hay auto-sync al reconectar.
+        self.network = NetworkMonitor()
     }
 }

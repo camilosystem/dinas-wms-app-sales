@@ -2,20 +2,22 @@ import Foundation
 import Network
 import os
 
-/// Observa la conectividad y dispara una acción al RECUPERAR la red (transición
-/// offline → online). La app es offline-first; esto solo aprovecha la reconexión
-/// para sincronizar sin que el vendedor tenga que pulsar nada.
+/// Observa la conectividad, **solo para informar** (banner "sin conexión").
+///
+/// Decisión de producto: la sincronización es SIEMPRE manual, disparada por el vendedor.
+/// El monitor NO dispara sync al reconectar — el vendedor necesita control y certeza de
+/// qué se sincronizó y cuándo. Aquí no hay ningún efecto secundario más allá de publicar
+/// `isOnline`.
 @MainActor
 final class NetworkMonitor: ObservableObject {
     @Published private(set) var isOnline = true
-    /// Se invoca al recuperar la conexión (no en el primer estado ni en cada cambio).
-    var onReconnect: () -> Void = {}
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.dinas.sales.network")
-    private var wasOffline = false
 
-    init() {
+    /// `autoStart: false` en tests, para dirigir el estado con `handle(online:)`.
+    init(autoStart: Bool = true) {
+        guard autoStart else { return }
         monitor.pathUpdateHandler = { [weak self] path in
             let online = path.status == .satisfied
             Task { @MainActor in self?.handle(online: online) }
@@ -23,15 +25,11 @@ final class NetworkMonitor: ObservableObject {
         monitor.start(queue: queue)
     }
 
-    private func handle(online: Bool) {
-        let recovered = online && wasOffline
-        wasOffline = !online
+    /// Actualiza el estado de conectividad. Solo publica `isOnline`; sin más efectos.
+    /// Interno para poder simular transiciones en tests.
+    func handle(online: Bool) {
         isOnline = online
         AppLog.network.debug("red \(online ? "online" : "offline", privacy: .public)")
-        if recovered {
-            AppLog.network.info("red recuperada → auto-sync")
-            onReconnect()
-        }
     }
 
     deinit {

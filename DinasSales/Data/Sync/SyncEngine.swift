@@ -15,7 +15,9 @@ final class SyncEngine: ObservableObject {
     var onUnauthorized: () -> Void
 
     @Published private(set) var isSyncing = false
-    @Published private(set) var lastError: String?
+    /// Resultado legible de la última sincronización (éxito o error). El vendedor SIEMPRE
+    /// ve qué pasó: cuántas órdenes se enviaron, cuántas quedaron pendientes, o el error.
+    @Published private(set) var feedback: SyncFeedback?
     /// Momento (hora del dispositivo) de la última sincronización exitosa. Persistido
     /// para sobrevivir reinicios de la app. `nil` si nunca se sincronizó.
     @Published private(set) var lastSyncedAt: Date?
@@ -59,23 +61,42 @@ final class SyncEngine: ObservableObject {
 
         AppLog.sync.info("sync iniciada")
         do {
-            let failedUploads = try await pushConfirmedOrders()
+            let pendingBefore = (try? ordersRepo.confirmedOrders().count) ?? 0
+            let failed = try await pushConfirmedOrders()
             try await pullCatalog()
             try await pullClients()
             recordSyncSuccess()
-            if failedUploads > 0 {
-                AppLog.sync.warning("sync completada con \(failedUploads, privacy: .public) orden(es) sin subir")
-                lastError = "\(failedUploads) orden(es) sin subir. Se reintentará."
-            } else {
-                AppLog.sync.info("sync completada")
-            }
+            let uploaded = max(0, pendingBefore - failed)
+            feedback = Self.makeFeedback(uploaded: uploaded, failed: failed)
+            AppLog.sync.info("sync completada: \(uploaded, privacy: .public) enviada(s), \(failed, privacy: .public) pendiente(s)")
         } catch APIError.unauthorized {
             AppLog.sync.warning("sync: 401 no autorizado → re-login")
             onUnauthorized()
         } catch {
             AppLog.sync.error("sync falló: \(String(describing: error), privacy: .public)")
-            lastError = "No se pudo sincronizar. Revisa la conexión."
+            feedback = SyncFeedback(
+                message: "No se pudo sincronizar. Tus órdenes siguen guardadas; reintenta cuando tengas señal.",
+                isError: true
+            )
         }
+    }
+
+    /// Construye el mensaje de resultado de una sincronización con subida.
+    private static func makeFeedback(uploaded: Int, failed: Int) -> SyncFeedback {
+        if failed > 0 {
+            let prefix = uploaded == 0
+                ? "No se pudo enviar ninguna orden"
+                : "\(uploaded) orden(es) enviada(s), \(failed) sin enviar"
+            return SyncFeedback(
+                message: "\(prefix). Las pendientes siguen guardadas; reintenta.",
+                isError: true
+            )
+        }
+        if uploaded > 0 {
+            return SyncFeedback(message: "Se enviaron \(uploaded) orden(es). Datos actualizados.",
+                                isError: false)
+        }
+        return SyncFeedback(message: "Datos actualizados.", isError: false)
     }
 
     /// Solo bajada (usado por el pull-to-refresh de catálogo/clientes).
@@ -88,13 +109,15 @@ final class SyncEngine: ObservableObject {
             try await pullCatalog()
             try await pullClients()
             recordSyncSuccess()
+            feedback = SyncFeedback(message: "Datos actualizados.", isError: false)
             AppLog.sync.info("bajada completada")
         } catch APIError.unauthorized {
             AppLog.sync.warning("bajada: 401 no autorizado → re-login")
             onUnauthorized()
         } catch {
             AppLog.sync.error("bajada falló: \(String(describing: error), privacy: .public)")
-            lastError = "No se pudo sincronizar. Revisa la conexión."
+            feedback = SyncFeedback(message: "No se pudo sincronizar. Revisa la conexión.",
+                                    isError: true)
         }
     }
 
@@ -109,7 +132,7 @@ final class SyncEngine: ObservableObject {
     private func beginSync() -> Bool {
         guard !isSyncing else { return false }
         isSyncing = true
-        lastError = nil
+        feedback = nil
         return true
     }
 
@@ -183,4 +206,10 @@ final class SyncEngine: ObservableObject {
             try SyncState.fetchOne(db, key: resource)?.lastSyncedAt
         }
     }
+}
+
+/// Resultado legible de una sincronización, para mostrarle al vendedor.
+struct SyncFeedback: Equatable {
+    let message: String
+    let isError: Bool
 }

@@ -420,4 +420,28 @@ final class SyncEngineTests: XCTestCase {
 
         XCTAssertEqual(engine.lastSyncedAt, previo, "sobrevive reinicios de la app")
     }
+
+    // MARK: - Sync siempre manual
+
+    /// Decisión de producto: recuperar la red NO dispara sincronización automática.
+    /// El monitor es solo informativo; nadie lo conecta al motor de sync.
+    func test_reconexionDeRed_noDisparaSyncAutomatico() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")     // hay una orden pendiente de subir
+        let api = StubSyncAPI()
+        let engine = SyncEngine(database: db, api: api)   // el motor existe; nadie lo dispara
+        let monitor = NetworkMonitor(autoStart: false)    // dirigimos el estado a mano
+
+        // Simula: se pierde la red y luego se recupera.
+        monitor.handle(online: false)
+        XCTAssertFalse(monitor.isOnline)
+        monitor.handle(online: true)
+        XCTAssertTrue(monitor.isOnline)
+
+        // La reconexión es solo informativa: NO debe iniciar ninguna sincronización.
+        XCTAssertEqual(api.postedUUIDs, [], "la reconexión no sube órdenes")
+        XCTAssertNil(api.lastCatalogSince, "la reconexión no baja catálogo")
+        XCTAssertFalse(engine.isSyncing)
+        XCTAssertNil(engine.feedback, "no hubo sincronización, no hay feedback")
+    }
 }
