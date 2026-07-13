@@ -24,7 +24,6 @@ struct CatalogRepository {
                     || Column("name").like(pattern, escape: esc)
                     || Column("category").like(pattern, escape: esc)
                     || Column("barcode").like(pattern, escape: esc)
-                    || Column("comments").like(pattern, escape: esc)
                 )
             }
 

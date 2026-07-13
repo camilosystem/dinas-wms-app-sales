@@ -2,20 +2,28 @@ import Foundation
 
 /// Una línea del carrito lista para mostrar (línea + nombre del ítem + total).
 struct CartRow: Identifiable, Equatable {
+    let lineId: Int64
     let itemCode: String
     let name: String
     let quantity: Double
     let unitPrice: Double
+    let priceList: Int
     let discountPct: Double
-    var id: String { itemCode }
+    var id: Int64 { lineId }
     var lineTotal: Double { quantity * unitPrice * (1 - discountPct / 100) }
 }
 
 /// Estado del carrito de UNA orden (borrador) para un cliente.
+///
+/// El vendedor elige la lista de precio POR LÍNEA, solo entre las autorizadas del cliente.
+/// Si el cliente tiene una sola lista autorizada, no hay selector (se usa esa).
 @MainActor
 final class OrderCartViewModel: ObservableObject {
     let order: Order
     let clientName: String
+    /// Listas que el vendedor puede usar con este cliente (1 o 2).
+    let authorizedPriceLists: [Int]
+    let defaultPriceList: Int
 
     @Published private(set) var rows: [CartRow] = []
     @Published private(set) var total: Double = 0
@@ -24,10 +32,15 @@ final class OrderCartViewModel: ObservableObject {
     private let orders: OrdersRepository
     private let catalog: CatalogRepository
 
+    var canChoosePriceList: Bool { authorizedPriceLists.count > 1 }
+
     init(order: Order, clientName: String,
+         authorizedPriceLists: [Int], defaultPriceList: Int,
          orders: OrdersRepository, catalog: CatalogRepository) {
         self.order = order
         self.clientName = clientName
+        self.authorizedPriceLists = authorizedPriceLists.isEmpty ? [defaultPriceList] : authorizedPriceLists
+        self.defaultPriceList = defaultPriceList
         self.orders = orders
         self.catalog = catalog
     }
@@ -38,8 +51,9 @@ final class OrderCartViewModel: ObservableObject {
             let lines = try orders.lines(orderUUID: order.clientUUID)
             rows = try lines.map { line in
                 let name = try catalog.item(code: line.itemCode)?.name ?? line.itemCode
-                return CartRow(itemCode: line.itemCode, name: name, quantity: line.quantity,
-                               unitPrice: line.unitPrice, discountPct: line.lineDiscountPct)
+                return CartRow(lineId: line.id ?? 0, itemCode: line.itemCode, name: name,
+                               quantity: line.quantity, unitPrice: line.unitPrice,
+                               priceList: line.priceList, discountPct: line.lineDiscountPct)
             }
             total = rows.reduce(0) { $0 + $1.lineTotal }
             errorMessage = nil
@@ -48,18 +62,33 @@ final class OrderCartViewModel: ObservableObject {
         }
     }
 
-    /// Añade un ítem (o suma 1 a su cantidad si ya está).
+    /// Cantidades en el carrito por ítem (todas las listas), para el contador del picker.
+    var quantitiesByItem: [String: Double] {
+        rows.reduce(into: [:]) { $0[$1.itemCode, default: 0] += $1.quantity }
+    }
+
+    /// Añade un ítem con la lista por defecto del cliente (o suma 1 si ya está en esa lista).
     func addOne(_ item: Item) {
-        let current = rows.first(where: { $0.itemCode == item.itemCode })?.quantity ?? 0
-        setQuantity(itemCode: item.itemCode, quantity: current + 1)
+        let current = rows.first { $0.itemCode == item.itemCode && $0.priceList == defaultPriceList }?.quantity ?? 0
+        write { try orders.setQuantity(orderUUID: order.clientUUID, itemCode: item.itemCode,
+                                       priceList: defaultPriceList, quantity: current + 1) }
     }
 
-    func setQuantity(itemCode: String, quantity: Double) {
-        write { try orders.setQuantity(orderUUID: order.clientUUID, itemCode: itemCode, quantity: quantity) }
+    func setQuantity(_ row: CartRow, quantity: Double) {
+        if quantity <= 0 {
+            write { try orders.removeLine(lineId: row.lineId) }
+        } else {
+            write { try orders.setQuantity(orderUUID: order.clientUUID, itemCode: row.itemCode,
+                                           priceList: row.priceList, quantity: quantity) }
+        }
     }
 
-    func setDiscount(itemCode: String, percent: Double) {
-        write { try orders.setDiscount(orderUUID: order.clientUUID, itemCode: itemCode, percent: percent) }
+    func setDiscount(_ row: CartRow, percent: Double) {
+        write { try orders.setDiscount(lineId: row.lineId, percent: percent) }
+    }
+
+    func setPriceList(_ row: CartRow, priceList: Int) {
+        write { try orders.setPriceList(lineId: row.lineId, priceList: priceList) }
     }
 
     /// Descarta el borrador (y sus líneas). Devuelve `true` si se eliminó.
@@ -91,9 +120,6 @@ final class OrderCartViewModel: ObservableObject {
         do {
             try action()
             reload()
-        } catch OrdersError.itemNotOrderable {
-            // Backstop: la UI ya oculta estos ítems, pero por si acaso.
-            errorMessage = "Ese ítem no tiene precio y no se puede ordenar."
         } catch {
             errorMessage = "No se pudo actualizar el carrito."
         }

@@ -116,13 +116,59 @@ struct AppDatabase {
             }
         }
 
-        // Las futuras migraciones se AÑADEN aquí, nunca editando las anteriores. Ej.:
-        //
-        //   migrator.registerMigration("v2_agrega_notas_a_items") { db in
-        //       try db.alter(table: "items") { t in
-        //           t.add(column: "internal_notes", .text)
-        //       }
-        //   }
+        // v0.3.0: 3 listas de precio por ítem, listas autorizadas por cliente, y
+        // price_list obligatorio por línea. Preserva las órdenes del vendedor.
+        migrator.registerMigration("v2_listas_de_precio") { db in
+            // items: nuevo esquema con 3 listas (sin `price`/`comments`). Es CACHÉ → se
+            // re-sincroniza; recrear la tabla es seguro (nada la referencia).
+            try db.drop(table: "items")
+            try db.create(table: "items") { t in
+                t.primaryKey("item_code", .text)
+                t.column("name", .text).notNull()
+                t.column("category", .text)
+                t.column("barcode", .text).indexed()
+                t.column("price_list_1", .double).notNull().defaults(to: 0)
+                t.column("price_list_2", .double).notNull().defaults(to: 0)
+                t.column("price_list_3", .double).notNull().defaults(to: 0)
+                t.column("stock", .double)
+                t.column("available", .double).notNull().defaults(to: 0)
+                t.column("image_url", .text)
+                t.column("active", .boolean).notNull().defaults(to: true)
+            }
+
+            // clients: listas de precio (aditivo).
+            try db.alter(table: "clients") { t in
+                t.add(column: "default_price_list", .integer).notNull().defaults(to: 1)
+                // authorized_price_lists: GRDB persiste el [Int] como JSON en esta columna.
+                t.add(column: "authorized_price_lists", .text).notNull().defaults(to: "[1]")
+            }
+
+            // order_lines: price_list pasa a entero OBLIGATORIO (1/2/3). Se recrea la tabla
+            // preservando las órdenes; las líneas legacy (price_list nulo) se rellenan con 1.
+            // order_lines es tabla hija (nada la referencia) → recrear es seguro con FK on.
+            try db.create(table: "order_lines_new") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("order_uuid", .text).notNull()
+                    .references("orders", column: "client_uuid", onDelete: .cascade)
+                t.column("item_code", .text).notNull()
+                t.column("quantity", .double).notNull()
+                t.column("unit_price", .double).notNull()
+                t.column("line_discount_pct", .double).notNull().defaults(to: 0)
+                t.column("price_list", .integer).notNull().defaults(to: 1)
+            }
+            try db.execute(sql: """
+                INSERT INTO order_lines_new
+                    (id, order_uuid, item_code, quantity, unit_price, line_discount_pct, price_list)
+                SELECT id, order_uuid, item_code, quantity, unit_price, line_discount_pct,
+                       COALESCE(CAST(price_list AS INTEGER), 1)
+                FROM order_lines
+                """)
+            try db.drop(table: "order_lines")
+            try db.rename(table: "order_lines_new", to: "order_lines")
+
+            // El esquema de catálogo/clientes cambió → forzar re-sync COMPLETO (sin `since`).
+            try db.execute(sql: "DELETE FROM sync_state")
+        }
 
         return migrator
     }

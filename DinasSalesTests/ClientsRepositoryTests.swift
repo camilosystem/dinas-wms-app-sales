@@ -13,7 +13,8 @@ final class ClientsRepositoryTests: XCTestCase {
     private func client(_ code: String, name: String, city: String? = nil,
                         route: String? = nil) -> Client {
         Client(clientCode: code, name: name, address: nil, city: city,
-               zipcode: nil, managerName: nil, shippingRoute: route)
+               zipcode: nil, managerName: nil, shippingRoute: route,
+               defaultPriceList: 1, authorizedPriceLists: [1])
     }
 
     func test_clients_sinQuery_ordenadosPorNombre() throws {

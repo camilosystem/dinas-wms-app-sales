@@ -7,9 +7,12 @@ struct OrderReadOnlyView: View {
     let orderNumber: String?
 
     init(order: Order, clientName: String, database: AppDatabase) {
+        let client = try? ClientsRepository(database: database).client(code: order.clientCode)
         _viewModel = StateObject(wrappedValue: OrderCartViewModel(
             order: order,
             clientName: clientName,
+            authorizedPriceLists: client?.authorizedPriceLists ?? [],
+            defaultPriceList: client?.defaultPriceList ?? 1,
             orders: OrdersRepository(database: database),
             catalog: CatalogRepository(database: database)
         ))
@@ -33,6 +36,7 @@ struct OrderReadOnlyView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.name)
                             Text("\(row.quantity.formatted()) × \(MoneyFormat.string(row.unitPrice))"
+                                 + " · Lista \(row.priceList)"
                                  + (row.discountPct > 0 ? "  (−\(row.discountPct.formatted())%)" : ""))
                                 .font(.caption).foregroundStyle(.secondary)
                         }

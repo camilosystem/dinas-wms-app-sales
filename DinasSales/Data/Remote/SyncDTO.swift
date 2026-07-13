@@ -54,15 +54,15 @@ struct OrderCreateDTO: Encodable {
         let itemCode: String
         let quantity: Double
         let unitPrice: Double
+        let priceList: Int          // 1/2/3 — obligatorio en v0.3.0
         let lineDiscountPct: Double
-        let priceList: String?
 
         enum CodingKeys: String, CodingKey {
             case itemCode = "item_code"
             case quantity
             case unitPrice = "unit_price"
-            case lineDiscountPct = "line_discount_pct"
             case priceList = "price_list"
+            case lineDiscountPct = "line_discount_pct"
         }
     }
 
@@ -81,7 +81,7 @@ struct OrderCreateDTO: Encodable {
         self.notes = order.notes
         self.lines = lines.map {
             Line(itemCode: $0.itemCode, quantity: $0.quantity, unitPrice: $0.unitPrice,
-                 lineDiscountPct: $0.lineDiscountPct, priceList: $0.priceList)
+                 priceList: $0.priceList, lineDiscountPct: $0.lineDiscountPct)
         }
     }
 }

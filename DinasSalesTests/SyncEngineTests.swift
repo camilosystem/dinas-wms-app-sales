@@ -119,8 +119,8 @@ final class SyncEngineTests: XCTestCase {
 
     private func makeItem(_ code: String, available: Double, active: Bool = true) -> Item {
         Item(itemCode: code, name: "Item \(code)", category: nil, barcode: nil,
-             comments: nil, price: nil, stock: nil, available: available,
-             imageURL: nil, active: active)
+             priceList1: 10, priceList2: 10, priceList3: 10, stock: nil,
+             available: available, imageURL: nil, active: active)
     }
 
     func test_pullCatalog_persisteItemsYGuardaMarcaDeAgua() async throws {
@@ -175,7 +175,7 @@ final class SyncEngineTests: XCTestCase {
         let t = Date(timeIntervalSince1970: 500)
         let cliente = Client(clientCode: "C1", name: "Tienda", address: "Calle 1",
                              city: "Ciudad", zipcode: "0000", managerName: "Ana",
-                             shippingRoute: "R1")
+                             shippingRoute: "R1", defaultPriceList: 1, authorizedPriceLists: [1])
         let api = StubSyncAPI(
             catalog: CatalogPage(items: [], serverTime: t),
             clients: ClientsPage(clients: [cliente], serverTime: t)
@@ -199,12 +199,14 @@ final class SyncEngineTests: XCTestCase {
                                     makeUUID: { uuid })
         try db.dbQueue.write { database in
             try Client(clientCode: "C1", name: "Tienda", address: nil, city: nil,
-                       zipcode: nil, managerName: nil, shippingRoute: nil).insert(database)
-            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil, comments: nil,
-                     price: price, stock: nil, available: 5, imageURL: nil, active: true).insert(database)
+                       zipcode: nil, managerName: nil, shippingRoute: nil,
+                       defaultPriceList: 1, authorizedPriceLists: [1]).insert(database)
+            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil,
+                     priceList1: price, priceList2: price, priceList3: price, stock: nil,
+                     available: 5, imageURL: nil, active: true).insert(database)
         }
         let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2)
         try repo.confirm(orderUUID: order.clientUUID)
     }
 
@@ -274,15 +276,17 @@ final class SyncEngineTests: XCTestCase {
         let db = try AppDatabase.makeInMemory()
         try await db.dbQueue.write { database in
             try Client(clientCode: "C1", name: "Tienda", address: nil, city: nil, zipcode: nil,
-                       managerName: nil, shippingRoute: nil).insert(database)
-            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil, comments: nil,
-                     price: 10, stock: nil, available: 5, imageURL: nil, active: true).insert(database)
+                       managerName: nil, shippingRoute: nil,
+                       defaultPriceList: 1, authorizedPriceLists: [1]).insert(database)
+            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil,
+                     priceList1: 10, priceList2: 10, priceList3: 10, stock: nil,
+                     available: 5, imageURL: nil, active: true).insert(database)
         }
         // Orden confirmada hace 8 días (vencida): su taken_at es esa fecha real.
         let takenAt = Date(timeIntervalSince1970: 1_000)
         let creator = OrdersRepository(database: db, now: { takenAt }, makeUUID: { "ORD-1" })
         let order = try creator.startOrder(clientCode: "C1")
-        try creator.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
+        try creator.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2)
         try creator.confirm(orderUUID: order.clientUUID)
         let confirmed = try creator.order(uuid: "ORD-1")!
 

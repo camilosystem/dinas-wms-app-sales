@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Carrito de una orden (borrador): agrega ítems, ajusta cantidad y descuento de línea,
-/// guarda como borrador o confirma. `unit_price` viene del catálogo (no editable).
+/// Carrito de una orden (borrador): agrega ítems, ajusta cantidad, **lista de precio por
+/// línea** y descuento de línea; guarda como borrador o confirma. `unit_price` toma el
+/// precio del ítem en la lista elegida (0 es válido y ordenable).
 struct OrderCartView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @StateObject private var viewModel: OrderCartViewModel
@@ -12,9 +13,15 @@ struct OrderCartView: View {
     @State private var showDiscardConfirm = false
 
     init(order: Order, clientName: String, database: AppDatabase, onFinish: @escaping () -> Void) {
+        // Listas de precio del cliente (para elegir por línea, solo entre las autorizadas).
+        let client = try? ClientsRepository(database: database).client(code: order.clientCode)
+        let authorized = client?.authorizedPriceLists ?? []
+        let defaultList = client?.defaultPriceList ?? (authorized.first ?? 1)
         _viewModel = StateObject(wrappedValue: OrderCartViewModel(
             order: order,
             clientName: clientName,
+            authorizedPriceLists: authorized,
+            defaultPriceList: defaultList,
             orders: OrdersRepository(database: database),
             catalog: CatalogRepository(database: database)
         ))
@@ -31,8 +38,11 @@ struct OrderCartView: View {
                     ForEach(viewModel.rows) { row in
                         CartRowView(
                             row: row,
-                            onQuantity: { viewModel.setQuantity(itemCode: row.itemCode, quantity: $0) },
-                            onDiscount: { viewModel.setDiscount(itemCode: row.itemCode, percent: $0) }
+                            authorizedPriceLists: viewModel.authorizedPriceLists,
+                            canChoosePriceList: viewModel.canChoosePriceList,
+                            onQuantity: { viewModel.setQuantity(row, quantity: $0) },
+                            onDiscount: { viewModel.setDiscount(row, percent: $0) },
+                            onPriceList: { viewModel.setPriceList(row, priceList: $0) }
                         )
                     }
                 }
@@ -94,7 +104,8 @@ struct OrderCartView: View {
         .sheet(isPresented: $showItemPicker) {
             ItemPickerView(
                 database: environment.database,
-                quantities: Dictionary(uniqueKeysWithValues: viewModel.rows.map { ($0.itemCode, $0.quantity) }),
+                priceList: viewModel.defaultPriceList,
+                quantities: viewModel.quantitiesByItem,
                 onAdd: { viewModel.addOne($0) }
             )
         }
@@ -102,11 +113,14 @@ struct OrderCartView: View {
     }
 }
 
-/// Fila de línea: nombre, precio, stepper de cantidad y descuento de línea (%).
+/// Fila de línea: nombre, precio, stepper de cantidad, lista de precio y descuento.
 private struct CartRowView: View {
     let row: CartRow
+    let authorizedPriceLists: [Int]
+    let canChoosePriceList: Bool
     let onQuantity: (Double) -> Void
     let onDiscount: (Double) -> Void
+    let onPriceList: (Int) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -142,6 +156,22 @@ private struct CartRowView: View {
                     .keyboardType(.decimalPad)
                     #endif
                 }
+            }
+
+            // Selector de lista de precio (solo si el cliente tiene más de una autorizada).
+            if canChoosePriceList {
+                Picker("Lista", selection: Binding(
+                    get: { row.priceList },
+                    set: { onPriceList($0) }
+                )) {
+                    ForEach(authorizedPriceLists, id: \.self) { list in
+                        Text("Lista \(list)").tag(list)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } else {
+                Text("Lista \(row.priceList)")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)

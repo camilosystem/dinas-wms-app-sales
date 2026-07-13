@@ -18,15 +18,23 @@ final class OrdersRepositoryTests: XCTestCase {
 
     private func seed(_ db: AppDatabase) throws {
         try db.dbQueue.write { database in
+            // Cliente con 2 listas autorizadas (1 y 2): L1 = precio base, L2 = otro.
             try Client(clientCode: "C1", name: "Tienda Uno", address: nil, city: nil,
-                       zipcode: nil, managerName: nil, shippingRoute: nil).insert(database)
+                       zipcode: nil, managerName: nil, shippingRoute: nil,
+                       defaultPriceList: 1, authorizedPriceLists: [1, 2]).insert(database)
             try Item(itemCode: "I1", name: "Item 1", category: nil, barcode: nil,
-                     comments: nil, price: 10, stock: nil, available: 100,
-                     imageURL: nil, active: true).insert(database)
+                     priceList1: 10, priceList2: 8, priceList3: 0, stock: nil,
+                     available: 100, imageURL: nil, active: true).insert(database)
             try Item(itemCode: "I2", name: "Item 2", category: nil, barcode: nil,
-                     comments: nil, price: 5, stock: nil, available: 100,
-                     imageURL: nil, active: true).insert(database)
+                     priceList1: 5, priceList2: 4, priceList3: 0, stock: nil,
+                     available: 100, imageURL: nil, active: true).insert(database)
         }
+    }
+
+    /// Id de la (primera) línea de un ítem en una orden.
+    private func lineId(_ repo: OrdersRepository, _ uuid: String, _ item: String,
+                        priceList: Int = 1) throws -> Int64 {
+        try repo.lines(orderUUID: uuid).first { $0.itemCode == item && $0.priceList == priceList }!.id!
     }
 
     func test_startOrder_creaBorradorYNoDuplicaPorCliente() throws {
@@ -51,20 +59,20 @@ final class OrdersRepositoryTests: XCTestCase {
         let repo = makeRepo(db)
         let order = try repo.startOrder(clientCode: "C1")
 
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 3)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 3)
         var lines = try repo.lines(orderUUID: order.clientUUID)
         XCTAssertEqual(lines.count, 1)
         XCTAssertEqual(lines[0].unitPrice, 10)   // tomado del catálogo
         XCTAssertEqual(lines[0].quantity, 3)
 
         // Actualiza cantidad (no duplica).
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 7)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 7)
         lines = try repo.lines(orderUUID: order.clientUUID)
         XCTAssertEqual(lines.count, 1)
         XCTAssertEqual(lines[0].quantity, 7)
 
         // Cantidad 0 elimina la línea.
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 0)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 0)
         XCTAssertTrue(try repo.lines(orderUUID: order.clientUUID).isEmpty)
     }
 
@@ -73,14 +81,15 @@ final class OrdersRepositoryTests: XCTestCase {
         try seed(db)
         let repo = makeRepo(db)
         let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2) // 2×10
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2) // 2×10
 
-        try repo.setDiscount(orderUUID: order.clientUUID, itemCode: "I1", percent: 150)
+        let id = try lineId(repo, order.clientUUID, "I1")
+        try repo.setDiscount(lineId: id, percent: 150)
         let line = try repo.lines(orderUUID: order.clientUUID)[0]
         XCTAssertEqual(line.lineDiscountPct, 100)  // clamp a 100
         XCTAssertEqual(OrdersRepository.lineTotal(line), 0)
 
-        try repo.setDiscount(orderUUID: order.clientUUID, itemCode: "I1", percent: 10)
+        try repo.setDiscount(lineId: id, percent: 10)
         let line2 = try repo.lines(orderUUID: order.clientUUID)[0]
         XCTAssertEqual(OrdersRepository.lineTotal(line2), 18) // 2×10×0.9
     }
@@ -96,7 +105,7 @@ final class OrdersRepositoryTests: XCTestCase {
             XCTAssertEqual(error as? OrdersError, .emptyOrder)
         }
 
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 1)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 1)
         try repo.confirm(orderUUID: order.clientUUID)
 
         let confirmed = try db.dbQueue.read { try Order.fetchOne($0, key: order.clientUUID) }
@@ -114,8 +123,8 @@ final class OrdersRepositoryTests: XCTestCase {
         try seed(db)
         let repo = makeRepo(db)
         let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2) // 20
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I2", quantity: 4) // 20
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2) // 20
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I2", priceList: 1, quantity: 4) // 20
 
         let summaries = try repo.summaries()
         XCTAssertEqual(summaries.count, 1)
@@ -129,7 +138,7 @@ final class OrdersRepositoryTests: XCTestCase {
         try seed(db)
         let repo = makeRepo(db)
         let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 1)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 1)
 
         try repo.confirm(orderUUID: order.clientUUID)
         XCTAssertThrowsError(try repo.deleteDraft(orderUUID: order.clientUUID)) { error in
@@ -142,8 +151,8 @@ final class OrdersRepositoryTests: XCTestCase {
         try seed(db)
         let repo = makeRepo(db)
         let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I2", quantity: 1)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I2", priceList: 1, quantity: 1)
 
         try repo.deleteDraft(orderUUID: order.clientUUID)
 
@@ -156,46 +165,75 @@ final class OrdersRepositoryTests: XCTestCase {
         XCTAssertTrue(try repo.summaries().isEmpty)
     }
 
-    // MARK: - Regla de precio (cero es decisión; null es ausencia)
+    // MARK: - Listas de precio (v0.3.0): $0 ordenable, price_list por línea
 
-    /// Inserta un ítem con `price` explícito (posible cero o nil).
-    private func seedItem(_ db: AppDatabase, code: String, price: Double?) throws {
-        try db.dbQueue.write { database in
-            try Item(itemCode: code, name: "Item \(code)", category: nil, barcode: nil,
-                     comments: nil, price: price, stock: nil, available: 100,
-                     imageURL: nil, active: true).insert(database)
-        }
+    /// Ítem con price_list_3 = 0 (has_price_3 = false) se puede agregar y ordenar.
+    func test_itemPriceList3EnCero_seAgregaYOrdena() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)                                  // I1: L1=10, L2=8, L3=0
+        let repo = makeRepo(db)
+        let item = try CatalogRepository(database: db).item(code: "I1")!
+        XCTAssertFalse(item.hasPrice(forList: 3), "price_list_3 = 0 → has_price_3 = false (informativo)")
+        let order = try repo.startOrder(clientCode: "C1")
+
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 3, quantity: 2)
+
+        let line = try repo.lines(orderUUID: order.clientUUID)[0]
+        XCTAssertEqual(line.unitPrice, 0, "unit_price de la lista 3 = 0, válido")
+        XCTAssertEqual(line.priceList, 3)
+        // has_price_3 = false NO impide confirmar/ordenar.
+        XCTAssertNoThrow(try repo.confirm(orderUUID: order.clientUUID))
     }
 
-    func test_setQuantity_precioCero_creaLineaEnCero() throws {
+    /// La línea toma el unit_price y el price_list de la lista elegida (y viaja así en el DTO).
+    func test_lineaTomaUnitPriceYPriceListDeLaListaElegida() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db)
-        try seedItem(db, code: "PROMO", price: 0)          // línea regalada: 0 es válido
         let repo = makeRepo(db)
         let order = try repo.startOrder(clientCode: "C1")
 
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "PROMO", quantity: 3)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 2, quantity: 1)
+        let line = try repo.lines(orderUUID: order.clientUUID)[0]
+        XCTAssertEqual(line.priceList, 2)
+        XCTAssertEqual(line.unitPrice, 8, "precio de la lista 2")
+
+        // El DTO de subida lleva el price_list y unit_price correctos.
+        let dto = OrderCreateDTO(order: try repo.order(uuid: order.clientUUID)!, lines: [line])
+        XCTAssertEqual(dto.lines.first?.priceList, 2)
+        XCTAssertEqual(dto.lines.first?.unitPrice, 8)
+    }
+
+    /// Cambiar la lista de una línea recomputa su unit_price.
+    func test_cambiarListaDeLinea_recomputaUnitPrice() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 1)
+        let id = try lineId(repo, order.clientUUID, "I1", priceList: 1)
+
+        try repo.setPriceList(lineId: id, priceList: 2)
+
+        let line = try repo.lines(orderUUID: order.clientUUID)[0]
+        XCTAssertEqual(line.priceList, 2)
+        XCTAssertEqual(line.unitPrice, 8)
+    }
+
+    /// Dos líneas del mismo ítem con listas distintas coexisten.
+    func test_dosLineasMismoItemListasDistintas_coexisten() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 2, quantity: 3)
 
         let lines = try repo.lines(orderUUID: order.clientUUID)
-        XCTAssertEqual(lines.count, 1)
-        XCTAssertEqual(lines[0].unitPrice, 0)
-        XCTAssertEqual(OrdersRepository.lineTotal(lines[0]), 0)
-    }
-
-    func test_ordenTotalCero_sePuedeConfirmar() throws {
-        let db = try AppDatabase.makeInMemory()
-        try seed(db)
-        try seedItem(db, code: "PROMO", price: 0)
-        let repo = makeRepo(db)
-        let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "PROMO", quantity: 2)
-
-        // Total en cero, pero con línea: se confirma sin problema.
-        try repo.confirm(orderUUID: order.clientUUID)
-
-        let confirmed = try db.dbQueue.read { try Order.fetchOne($0, key: order.clientUUID) }
-        XCTAssertEqual(confirmed?.status, .confirmed)
-        XCTAssertEqual(try repo.summaries().first?.total, 0)
+        XCTAssertEqual(lines.count, 2, "mismo ítem en 2 listas → 2 líneas distintas")
+        XCTAssertEqual(Set(lines.map(\.priceList)), [1, 2])
+        XCTAssertEqual(lines.first { $0.priceList == 1 }?.unitPrice, 10)
+        XCTAssertEqual(lines.first { $0.priceList == 2 }?.unitPrice, 8)
     }
 
     func test_descuentoCien_esValido_totalCero() throws {
@@ -203,30 +241,14 @@ final class OrdersRepositoryTests: XCTestCase {
         try seed(db)
         let repo = makeRepo(db)
         let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2) // 2×10
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2) // 2×10
 
-        try repo.setDiscount(orderUUID: order.clientUUID, itemCode: "I1", percent: 100)
+        try repo.setDiscount(lineId: try lineId(repo, order.clientUUID, "I1"), percent: 100)
 
         let line = try repo.lines(orderUUID: order.clientUUID)[0]
         XCTAssertEqual(line.lineDiscountPct, 100)
         XCTAssertEqual(OrdersRepository.lineTotal(line), 0)
-        // Y con descuento 100% la orden se puede confirmar.
         XCTAssertNoThrow(try repo.confirm(orderUUID: order.clientUUID))
-    }
-
-    func test_setQuantity_precioNull_noSePuedeAgregar() throws {
-        let db = try AppDatabase.makeInMemory()
-        try seed(db)
-        try seedItem(db, code: "SINPRECIO", price: nil)   // dato ausente: no ordenable
-        let repo = makeRepo(db)
-        let order = try repo.startOrder(clientCode: "C1")
-
-        XCTAssertThrowsError(
-            try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "SINPRECIO", quantity: 1)
-        ) { error in
-            XCTAssertEqual(error as? OrdersError, .itemNotOrderable)
-        }
-        XCTAssertTrue(try repo.lines(orderUUID: order.clientUUID).isEmpty, "no se creó línea")
     }
 
     // MARK: - Pedidos vencidos (>7 días sin enviar) — nunca se borran solos
@@ -239,7 +261,7 @@ final class OrdersRepositoryTests: XCTestCase {
         let taken = ahora.addingTimeInterval(-daysAgo * 24 * 3600)
         let creator = OrdersRepository(database: db, now: { taken }, makeUUID: { uuid })
         let order = try creator.startOrder(clientCode: "C1")
-        try creator.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 1)
+        try creator.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 1)
         try creator.confirm(orderUUID: order.clientUUID)
         return order.clientUUID
     }

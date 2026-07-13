@@ -19,9 +19,10 @@ final class AppDatabaseTests: XCTestCase {
 
         try appDB.dbQueue.write { db in
             try Client(clientCode: "C1", name: "Tienda Central", address: nil, city: nil,
-                       zipcode: nil, managerName: nil, shippingRoute: nil).insert(db)
+                       zipcode: nil, managerName: nil, shippingRoute: nil,
+                       defaultPriceList: 1, authorizedPriceLists: [1, 2]).insert(db)
             try Item(itemCode: "A-100", name: "Producto", category: nil, barcode: nil,
-                     comments: nil, price: 5.0, stock: 20, available: 10,
+                     priceList1: 5.0, priceList2: 6.0, priceList3: 0, stock: 20, available: 10,
                      imageURL: nil, active: true).insert(db)
 
             try Order(clientUUID: uuid, clientCode: "C1", status: .confirmed, notes: nil,
@@ -30,7 +31,7 @@ final class AppDatabaseTests: XCTestCase {
                       syncedAt: nil, orderNumber: nil).insert(db)
 
             var line = OrderLine(id: nil, orderUUID: uuid, itemCode: "A-100",
-                                 quantity: 3, unitPrice: 5.0, lineDiscountPct: 10, priceList: nil)
+                                 quantity: 3, unitPrice: 5.0, lineDiscountPct: 10, priceList: 1)
             try line.insert(db)
             XCTAssertNotNil(line.id, "order_lines.id debe autoincrementarse")
         }
@@ -43,6 +44,18 @@ final class AppDatabaseTests: XCTestCase {
             let lineas = try OrderLine.filter(Column("order_uuid") == uuid).fetchAll(db)
             XCTAssertEqual(lineas.count, 1)
             XCTAssertEqual(lineas.first?.quantity, 3)
+            XCTAssertEqual(lineas.first?.priceList, 1)
+
+            // authorized_price_lists ([Int]) se persiste como JSON y vuelve intacto.
+            let cliente = try Client.fetchOne(db, key: "C1")
+            XCTAssertEqual(cliente?.authorizedPriceLists, [1, 2])
+            XCTAssertEqual(cliente?.defaultPriceList, 1)
+
+            // Item con 3 listas (price_list_3 = 0 es válido).
+            let item = try Item.fetchOne(db, key: "A-100")
+            XCTAssertEqual(item?.price(forList: 2), 6.0)
+            XCTAssertEqual(item?.price(forList: 3), 0)
+            XCTAssertFalse(item?.hasPrice(forList: 3) ?? true)
         }
     }
 }

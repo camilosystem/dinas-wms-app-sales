@@ -9,19 +9,23 @@ import GRDB
 
 // MARK: - Item (catálogo)
 
-/// Ítem del catálogo (schema `CatalogItem`).
-/// La app NO recalcula stock: muestra `available` tal cual lo calcula el middleware.
+/// Ítem del catálogo (schema `CatalogItem`, v0.3.0).
+///
+/// Trae los precios de las 3 listas (todos NO nullable; **0 es válido y ORDENABLE** —
+/// muestras, publicidad, promociones). `has_price` es derivado (precio != 0) y solo es
+/// informativo: NUNCA bloquea agregar al carrito. La app NO recalcula stock.
 struct Item: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
     var itemCode: String        // PK; identificador del ítem
     var name: String
     var category: String?
     var barcode: String?
-    var comments: String?
-    var price: Double?          // precio de la lista asignada al vendedor
+    var priceList1: Double      // precio en la lista 1 (0 = sin precio configurado, ordenable)
+    var priceList2: Double
+    var priceList3: Double
     var stock: Double?          // stock físico en SAP (informativo)
     var available: Double       // disponible ya calculado por el middleware
     var imageURL: String?       // descarga diferida; no viaja en el delta
-    var active: Bool            // si false, la app no lo muestra ni permite ordenarlo
+    var active: Bool            // si false, la app no lo muestra
 
     var id: String { itemCode }
 
@@ -29,9 +33,28 @@ struct Item: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatabl
 
     enum CodingKeys: String, CodingKey {
         case itemCode = "item_code"
-        case name, category, barcode, comments, price, stock, available
+        case name, category, barcode
+        case priceList1 = "price_list_1"
+        case priceList2 = "price_list_2"
+        case priceList3 = "price_list_3"
+        case stock, available
         case imageURL = "image_url"
         case active
+        // has_price_1/2/3 llegan en el JSON pero se DERIVAN de los precios (se ignoran).
+    }
+
+    /// Precio del ítem en la lista dada (1/2/3).
+    func price(forList list: Int) -> Double {
+        switch list {
+        case 1: return priceList1
+        case 2: return priceList2
+        default: return priceList3
+        }
+    }
+
+    /// ¿Hay precio configurado en esa lista? Informativo (precio 0 = sin configurar).
+    func hasPrice(forList list: Int) -> Bool {
+        price(forList: list) != 0
     }
 }
 
@@ -47,6 +70,10 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
     var zipcode: String?
     var managerName: String?
     var shippingRoute: String?
+    var defaultPriceList: Int   // lista por defecto (de SAP); siempre está en las autorizadas
+    /// Listas que el vendedor PUEDE usar con este cliente (1 o 2). GRDB la persiste como
+    /// JSON en su columna. El selector por línea solo ofrece estas.
+    var authorizedPriceLists: [Int]
 
     var id: String { clientCode }
 
@@ -57,6 +84,8 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
         case name, address, city, zipcode
         case managerName = "manager_name"
         case shippingRoute = "shipping_route"
+        case defaultPriceList = "default_price_list"
+        case authorizedPriceLists = "authorized_price_lists"
     }
 }
 
@@ -106,9 +135,9 @@ struct OrderLine: Codable, FetchableRecord, MutablePersistableRecord, Identifiab
     var orderUUID: String      // FK -> orders.client_uuid
     var itemCode: String
     var quantity: Double
-    var unitPrice: Double       // precio unitario capturado al tomar la orden
+    var unitPrice: Double       // precio unitario = precio del ítem en la lista elegida
     var lineDiscountPct: Double // descuento de línea en % (0–100)
-    var priceList: String?      // lista de precios usada en esta línea
+    var priceList: Int          // lista elegida para ESTA línea (1/2/3); obligatorio en v0.3.0
 
     static let databaseTableName = "order_lines"
 

@@ -17,15 +17,15 @@ struct ItemDetailView: View {
                     Text(item.itemCode).font(.subheadline).foregroundStyle(.secondary)
                 }
 
-                HStack(spacing: 24) {
-                    stat("Disponible", item.available.formatted(),
-                         color: item.available > 0 ? .green : .red)
-                    if let price = item.price {
-                        stat("Precio", MoneyFormat.string(price))
-                    } else {
-                        // price = null: sin precio de lista → no ordenable.
-                        stat("Precio", "Sin precio", color: .red)
-                    }
+                stat("Disponible", item.available.formatted(),
+                     color: item.available > 0 ? .green : .red)
+
+                // Precios en las 3 listas (0 es válido y ordenable — muestra / promoción).
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Precios").font(.caption).foregroundStyle(.secondary)
+                    priceRow("Lista 1", item.priceList1)
+                    priceRow("Lista 2", item.priceList2)
+                    priceRow("Lista 3", item.priceList3)
                 }
 
                 if let category = item.category, !category.isEmpty {
@@ -33,12 +33,6 @@ struct ItemDetailView: View {
                 }
                 if let barcode = item.barcode, !barcode.isEmpty {
                     row("Código de barras", barcode)
-                }
-                if let comments = item.comments, !comments.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Comentarios").font(.caption).foregroundStyle(.secondary)
-                        Text(comments)
-                    }
                 }
             }
             .padding()
@@ -62,4 +56,17 @@ struct ItemDetailView: View {
         }
         .font(.subheadline)
     }
+
+    private func priceRow(_ title: String, _ price: Double) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.secondary)
+            Spacer()
+            Text(MoneyFormat.string(price))
+            if price == 0 {
+                Text("(sin precio)").font(.caption2).foregroundStyle(.orange)
+            }
+        }
+        .font(.subheadline)
+    }
 }
+

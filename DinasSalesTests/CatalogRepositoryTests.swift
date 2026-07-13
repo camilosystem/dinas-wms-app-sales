@@ -11,9 +11,9 @@ final class CatalogRepositoryTests: XCTestCase {
     }
 
     private func item(_ code: String, name: String, category: String? = nil,
-                      comments: String? = nil, active: Bool = true) -> Item {
-        Item(itemCode: code, name: name, category: category, barcode: nil,
-             comments: comments, price: nil, stock: nil, available: 1,
+                      barcode: String? = nil, active: Bool = true) -> Item {
+        Item(itemCode: code, name: name, category: category, barcode: barcode,
+             priceList1: 10, priceList2: 10, priceList3: 10, stock: nil, available: 1,
              imageURL: nil, active: active)
     }
 
@@ -34,17 +34,19 @@ final class CatalogRepositoryTests: XCTestCase {
     func test_items_buscaPorCodigoNombreYPalabra() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db, [
-            item("SKU-100", name: "Camisa azul", category: "Ropa"),
-            item("SKU-200", name: "Pantalón", comments: "edición azul limitada"),
+            item("SKU-100", name: "Camisa azul", category: "Ropa", barcode: "AZ-200"),
+            item("SKU-200", name: "Pantalón azul", category: "Ropa"),
             item("SKU-300", name: "Gorra"),
         ])
         let repo = CatalogRepository(database: db)
 
         XCTAssertEqual(try repo.items(matching: "SKU-100").map(\.itemCode), ["SKU-100"])
-        // "azul" aparece en el nombre de uno y en los comentarios de otro.
+        // "azul" aparece en el nombre de dos ítems.
         XCTAssertEqual(Set(try repo.items(matching: "azul").map(\.itemCode)),
                        ["SKU-100", "SKU-200"])
-        XCTAssertEqual(try repo.items(matching: "Ropa").map(\.itemCode), ["SKU-100"])
+        XCTAssertEqual(try repo.items(matching: "Ropa").map(\.itemCode), ["SKU-100", "SKU-200"])
+        // Búsqueda por código de barras.
+        XCTAssertEqual(try repo.items(matching: "AZ-200").map(\.itemCode), ["SKU-100"])
     }
 
     func test_items_escapaComodinesDeLike() throws {

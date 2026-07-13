@@ -113,58 +113,68 @@ struct OrdersRepository {
 
     // MARK: - Líneas del carrito
 
-    /// Fija la cantidad de un ítem en la orden. Si no existe la línea, la crea tomando
-    /// el `unit_price` del catálogo (price de la lista asignada). `quantity <= 0` la elimina.
-    ///
-    /// Regla de precio: `price = 0` es válido (promoción / línea regalada). `price = null`
-    /// es un dato ausente → el ítem NO es ordenable y se rechaza (nunca se sustituye por 0).
-    func setQuantity(orderUUID: String, itemCode: String, quantity: Double) throws {
+    /// Fija la cantidad de un ítem en una LISTA DE PRECIO dada. La línea se identifica por
+    /// (orden, ítem, lista): así el mismo ítem en listas distintas coexiste. `unit_price`
+    /// toma el precio del ítem en esa lista — **0 es válido y ordenable** (v0.3.0).
+    /// `quantity <= 0` elimina la línea.
+    func setQuantity(orderUUID: String, itemCode: String, priceList: Int, quantity: Double) throws {
         try database.dbQueue.write { db in
             let existing = try OrderLine
                 .filter(Column("order_uuid") == orderUUID)
                 .filter(Column("item_code") == itemCode)
+                .filter(Column("price_list") == priceList)
                 .fetchOne(db)
 
             if quantity <= 0 {
                 try existing?.delete(db)
                 return
             }
+            guard let item = try Item.fetchOne(db, key: itemCode) else {
+                throw OrdersError.itemNotFound
+            }
+            let unitPrice = item.price(forList: priceList)   // 0 es un precio válido
 
             if var line = existing {
                 line.quantity = quantity
+                line.unitPrice = unitPrice
                 try line.update(db)
             } else {
-                guard let item = try Item.fetchOne(db, key: itemCode) else {
-                    throw OrdersError.itemNotFound
-                }
-                // price = 0 pasa el guard (promoción); price = null lo rechaza.
-                guard let unitPrice = item.price else {
-                    throw OrdersError.itemNotOrderable
-                }
                 var line = OrderLine(
-                    id: nil,
-                    orderUUID: orderUUID,
-                    itemCode: itemCode,
-                    quantity: quantity,
-                    unitPrice: unitPrice,
-                    lineDiscountPct: 0,
-                    priceList: nil
+                    id: nil, orderUUID: orderUUID, itemCode: itemCode, quantity: quantity,
+                    unitPrice: unitPrice, lineDiscountPct: 0, priceList: priceList
                 )
                 try line.insert(db)
             }
         }
     }
 
-    /// Fija el descuento de línea (%) de un ítem ya presente en la orden.
-    func setDiscount(orderUUID: String, itemCode: String, percent: Double) throws {
+    /// Fija el descuento de línea (%) de una línea concreta (por su id).
+    func setDiscount(lineId: Int64, percent: Double) throws {
         let clamped = min(max(percent, 0), 100)
         try database.dbQueue.write { db in
-            guard var line = try OrderLine
-                .filter(Column("order_uuid") == orderUUID)
-                .filter(Column("item_code") == itemCode)
-                .fetchOne(db) else { return }
+            guard var line = try OrderLine.fetchOne(db, key: lineId) else { return }
             line.lineDiscountPct = clamped
             try line.update(db)
+        }
+    }
+
+    /// Cambia la lista de precio de una línea → recomputa `unit_price` con esa lista.
+    func setPriceList(lineId: Int64, priceList: Int) throws {
+        try database.dbQueue.write { db in
+            guard var line = try OrderLine.fetchOne(db, key: lineId) else { return }
+            guard let item = try Item.fetchOne(db, key: line.itemCode) else {
+                throw OrdersError.itemNotFound
+            }
+            line.priceList = priceList
+            line.unitPrice = item.price(forList: priceList)
+            try line.update(db)
+        }
+    }
+
+    /// Elimina una línea del carrito (por su id).
+    func removeLine(lineId: Int64) throws {
+        try database.dbQueue.write { db in
+            _ = try OrderLine.deleteOne(db, key: lineId)
         }
     }
 
@@ -235,6 +245,5 @@ enum OrdersError: Error, Equatable {
     case notADraft
     case emptyOrder
     case itemNotFound
-    case itemNotOrderable    // ítem sin precio de lista (price = null): dato ausente
     case cannotDiscardSynced // no se descarta una orden ya sincronizada (es un registro)
 }

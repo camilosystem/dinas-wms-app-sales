@@ -9,8 +9,8 @@ private struct StubAuthAPI: AuthAPI, @unchecked Sendable {
     init(result: Result<LoginResponse, any Error>) { self.result = result }
 
     init(token: String, displayName: String? = nil) {
-        self.result = .success(LoginResponse(token: token, salespersonCode: nil,
-                                             displayName: displayName))
+        self.result = .success(LoginResponse(token: token, role: "VENDEDOR",
+                                             salespersonCode: nil, displayName: displayName))
     }
 
     func login(username: String, password: String) async throws -> LoginResponse {
@@ -194,9 +194,11 @@ final class AuthSessionTests: XCTestCase {
         let db = try AppDatabase.makeInMemory()
         try await db.dbQueue.write { database in
             try Client(clientCode: "C1", name: "Tienda", address: nil, city: nil,
-                       zipcode: nil, managerName: nil, shippingRoute: nil).insert(database)
-            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil, comments: nil,
-                     price: 10, stock: nil, available: 5, imageURL: nil, active: true).insert(database)
+                       zipcode: nil, managerName: nil, shippingRoute: nil,
+                       defaultPriceList: 1, authorizedPriceLists: [1]).insert(database)
+            try Item(itemCode: "I1", name: "Item", category: nil, barcode: nil,
+                     priceList1: 10, priceList2: 10, priceList3: 10, stock: nil,
+                     available: 5, imageURL: nil, active: true).insert(database)
         }
         let auth = makeAuth(api: StubAuthAPI(token: "t"),
                             store: InMemorySessionStore(session: sampleSession(password: "secreta",
@@ -212,7 +214,7 @@ final class AuthSessionTests: XCTestCase {
                                     now: { Date(timeIntervalSince1970: 0) },
                                     makeUUID: { "ORD-1" })
         let order = try repo.startOrder(clientCode: "C1")
-        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", quantity: 2)
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2)
         try repo.confirm(orderUUID: order.clientUUID)
 
         XCTAssertEqual(try repo.confirmedOrders().map(\.clientUUID), ["ORD-1"])

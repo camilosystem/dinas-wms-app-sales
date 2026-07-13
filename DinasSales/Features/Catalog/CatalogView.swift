@@ -82,18 +82,11 @@ private struct CatalogCell: View {
                 .font(.caption)
                 .foregroundStyle(item.available > 0 ? .green : .red)
 
-            if item.price == nil {
-                Text("Sin precio")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.red)
-            }
-
-            if let comments = item.comments, !comments.isEmpty {
-                Text(comments)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            // Precios de las 3 listas (el vendedor elige cuál al armar la orden).
+            Text("L1 \(MoneyFormat.string(item.priceList1)) · L2 \(MoneyFormat.string(item.priceList2)) · L3 \(MoneyFormat.string(item.priceList3))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
