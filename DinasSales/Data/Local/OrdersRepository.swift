@@ -91,6 +91,39 @@ struct OrdersRepository {
         }
     }
 
+    /// Marca una orden como RECHAZADA por un error permanente (400/404) con su motivo.
+    /// Deja de reintentarse; el vendedor decidirá corregirla o descartarla. Nunca toca
+    /// una ya sincronizada.
+    func markRejected(orderUUID: String, reason: String) throws {
+        try database.dbQueue.write { db in
+            guard var order = try Order.fetchOne(db, key: orderUUID) else { return }
+            guard order.status != .synced else { return }
+            order.status = .rejected
+            order.rejectionReason = reason
+            try order.update(db)
+        }
+    }
+
+    /// Órdenes rechazadas (requieren atención del vendedor).
+    func rejectedOrders() throws -> [Order] {
+        try database.dbQueue.read { db in
+            try Order.filter(Column("status") == OrderStatus.rejected.rawValue)
+                .order(Column("created_at")).fetchAll(db)
+        }
+    }
+
+    /// Reabre una orden rechazada como BORRADOR para corregirla (limpia el motivo).
+    func reopenRejected(orderUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard var order = try Order.fetchOne(db, key: orderUUID) else { return }
+            guard order.status == .rejected else { return }
+            order.status = .draft
+            order.rejectionReason = nil
+            order.takenAt = nil
+            try order.update(db)
+        }
+    }
+
     /// Borra un borrador (y sus líneas por cascada). Solo borradores.
     func deleteDraft(orderUUID: String) throws {
         try database.dbQueue.write { db in

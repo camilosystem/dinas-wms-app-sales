@@ -116,7 +116,7 @@ final class AuthSession: ObservableObject {
             loginFailure = .badCredentials
             errorMessage = "Usuario o contraseña incorrectos."
             AppLog.auth.warning("login: credenciales inválidas")
-        } catch APIError.server(let status) {
+        } catch APIError.server(let status, _) {
             // El servidor es alcanzable pero erró: tampoco caemos a offline.
             loginFailure = .serverError
             errorMessage = "El servidor no responde (\(status)). Intenta más tarde."

@@ -15,6 +15,7 @@ struct OrdersView: View {
     private var clientsRepo: ClientsRepository { ClientsRepository(database: environment.database) }
 
     private var overdueCount: Int { summaries.filter(\.isOverdue).count }
+    private var rejectedCount: Int { summaries.filter { $0.order.status == .rejected }.count }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -27,6 +28,7 @@ struct OrdersView: View {
                     )
                 } else {
                     VStack(spacing: 0) {
+                        if rejectedCount > 0 { rejectedBanner }
                         if overdueCount > 0 { overdueBanner }
                         list
                     }
@@ -61,6 +63,22 @@ struct OrdersView: View {
         }
     }
 
+    /// Aviso: órdenes rechazadas por el servidor. Requieren atención (corregir/descartar).
+    private var rejectedBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.octagon.fill")
+            Text(rejectedCount == 1
+                 ? "1 orden rechazada — requiere atención"
+                 : "\(rejectedCount) órdenes rechazadas — requieren atención")
+                .font(.callout.weight(.semibold))
+            Spacer()
+        }
+        .foregroundStyle(.red)
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(Color.red.opacity(0.12))
+    }
+
     /// Aviso rojo: hay pedidos vencidos (>7 días sin enviar). El vendedor decide qué hacer.
     private var overdueBanner: some View {
         HStack(spacing: 10) {
@@ -83,10 +101,11 @@ struct OrdersView: View {
                 NavigationLink(value: route(for: summary.order)) {
                     OrderRow(summary: summary)
                 }
-                // Descartar: borradores y vencidos (acción explícita). Las confirmadas
-                // recientes y las sincronizadas NO se descartan desde aquí.
+                // Descartar: borradores, vencidos y RECHAZADAS (acción explícita). Las
+                // confirmadas recientes y las sincronizadas NO se descartan desde aquí.
                 .swipeActions(edge: .trailing) {
-                    if summary.order.status == .draft || summary.isOverdue {
+                    if summary.order.status == .draft || summary.isOverdue
+                        || summary.order.status == .rejected {
                         Button(role: .destructive) {
                             orderToDiscard = summary
                         } label: {
@@ -94,13 +113,20 @@ struct OrdersView: View {
                         }
                     }
                 }
-                // Enviar un vencido "igual": viaja con su taken_at real.
                 .swipeActions(edge: .leading) {
+                    // Enviar un vencido "igual": viaja con su taken_at real.
                     if summary.isOverdue {
                         Button { sendOverdue(summary) } label: {
                             Label("Enviar", systemImage: "paperplane")
                         }
                         .tint(.blue)
+                    }
+                    // Corregir una rechazada: vuelve a borrador para editarla.
+                    if summary.order.status == .rejected {
+                        Button { correct(summary) } label: {
+                            Label("Corregir", systemImage: "pencil")
+                        }
+                        .tint(.orange)
                     }
                 }
             }
@@ -114,15 +140,17 @@ struct OrdersView: View {
         ) { summary in
             Button("Descartar", role: .destructive) { discard(summary) }
             Button("Cancelar", role: .cancel) { orderToDiscard = nil }
-        } message: { summary in
-            Text(summary.isOverdue
-                 ? "Se eliminará este pedido vencido y no se enviará. Esta acción no se puede deshacer."
-                 : "Se eliminará la orden y sus líneas. Esta acción no se puede deshacer.")
+        } message: { _ in
+            Text("Se eliminará la orden y sus líneas. Esta acción no se puede deshacer.")
         }
     }
 
     private var discardTitle: String {
-        (orderToDiscard?.isOverdue ?? false) ? "¿Descartar este pedido vencido?" : "¿Descartar este borrador?"
+        switch orderToDiscard?.order.status {
+        case .rejected: return "¿Descartar esta orden rechazada?"
+        default: return (orderToDiscard?.isOverdue ?? false)
+            ? "¿Descartar este pedido vencido?" : "¿Descartar este borrador?"
+        }
     }
 
     // MARK: - Navegación
@@ -159,6 +187,17 @@ struct OrdersView: View {
         } catch {
             loadError = true
             showClientPicker = false
+        }
+    }
+
+    /// Corregir una rechazada: la reabre como borrador y la abre en el carrito.
+    private func correct(_ summary: OrderSummary) {
+        do {
+            try ordersRepo.reopenRejected(orderUUID: summary.order.clientUUID)
+            reload()
+            path = [.cart(summary.order.clientUUID)]
+        } catch {
+            loadError = true
         }
     }
 
@@ -215,6 +254,10 @@ private struct OrderRow: View {
                 Text(summary.clientName).font(.body.weight(.medium))
                 Text("\(summary.itemCount) ítem(s) · \(MoneyFormat.string(summary.total))")
                     .font(.caption).foregroundStyle(.secondary)
+                if summary.order.status == .rejected, let reason = summary.order.rejectionReason {
+                    Text(reason)
+                        .font(.caption2).foregroundStyle(.red).lineLimit(2)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {

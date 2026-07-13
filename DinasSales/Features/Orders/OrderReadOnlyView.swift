@@ -30,6 +30,12 @@ struct OrderReadOnlyView: View {
                 }
             }
 
+            if status == .rejected, let reason = viewModel.order.rejectionReason {
+                Section("Motivo del rechazo") {
+                    Text(reason).foregroundStyle(.red)
+                }
+            }
+
             Section("Ítems") {
                 ForEach(viewModel.rows) { row in
                     HStack {
@@ -78,6 +84,7 @@ struct OrderStatusBadge: View {
         case .draft: return "Borrador"
         case .confirmed: return "Confirmada"
         case .synced: return "Sincronizada"
+        case .rejected: return "Rechazada"
         }
     }
 
@@ -86,6 +93,7 @@ struct OrderStatusBadge: View {
         case .draft: return .orange
         case .confirmed: return .blue
         case .synced: return .green
+        case .rejected: return .red
         }
     }
 }

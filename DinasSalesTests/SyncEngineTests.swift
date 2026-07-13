@@ -242,7 +242,7 @@ final class SyncEngineTests: XCTestCase {
         let db = try AppDatabase.makeInMemory()
         try seedConfirmedOrder(db, uuid: "ORD-1")
         let api = StubSyncAPI()
-        api.postError = APIError.server(status: 500)
+        api.postError = APIError.server(status: 500, message: nil)
         let engine = SyncEngine(database: db, api: api)
 
         let failed = try await engine.pushConfirmedOrders()
@@ -256,6 +256,54 @@ final class SyncEngineTests: XCTestCase {
         let failed2 = try await engine.pushConfirmedOrders()
         XCTAssertEqual(failed2, 0)
         XCTAssertEqual(api.postedUUIDs, ["ORD-1"])
+    }
+
+    // MARK: - Error permanente (400/404) vs transitorio (5xx/timeout)
+
+    func test_push_400_marcaRechazadaConMotivo_yNoReintenta() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        api.postError = APIError.server(status: 400, message: "Cliente inválido")
+        let engine = SyncEngine(database: db, api: api)
+
+        let failed = try await engine.pushConfirmedOrders()
+        XCTAssertEqual(failed, 0, "un 400 no es fallo transitorio")
+
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .rejected)
+        XCTAssertEqual(order?.rejectionReason, "Cliente inválido")
+
+        // Segundo sync: la rechazada NO se reintenta (ya no es confirmada).
+        api.postError = nil
+        _ = try await engine.pushConfirmedOrders()
+        XCTAssertEqual(api.postedUUIDs, [], "una orden rechazada no se vuelve a enviar")
+    }
+
+    func test_push_500_esTransitorio_seReintenta() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        api.postError = APIError.server(status: 500, message: nil)
+        let engine = SyncEngine(database: db, api: api)
+
+        let failed = try await engine.pushConfirmedOrders()
+        XCTAssertEqual(failed, 1)
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .confirmed, "un 500 la deja confirmada para reintentar")
+    }
+
+    func test_push_timeout_esTransitorio_seReintenta() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        api.postError = URLError(.timedOut)
+        let engine = SyncEngine(database: db, api: api)
+
+        let failed = try await engine.pushConfirmedOrders()
+        XCTAssertEqual(failed, 1)
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .confirmed, "un timeout es transitorio")
     }
 
     func test_push_ordenTotalCero_seEnviaYMarcaSincronizada() async throws {
@@ -435,7 +483,7 @@ final class SyncEngineTests: XCTestCase {
     func test_syncFallida_noRegistraLastSyncedAt() async throws {
         let db = try AppDatabase.makeInMemory()
         let api = StubSyncAPI()
-        api.fetchError = APIError.server(status: 500)
+        api.fetchError = APIError.server(status: 500, message: nil)
         let engine = SyncEngine(database: db, api: api,
                                 now: { Date(timeIntervalSince1970: 1) },
                                 defaults: freshDefaults("test.lastsync.fail"))

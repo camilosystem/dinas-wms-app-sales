@@ -149,9 +149,9 @@ final class SyncEngine: ObservableObject {
     // MARK: - Subida
 
     /// Sube todas las órdenes confirmadas y las marca sincronizadas. Devuelve cuántas
-    /// fallaron por causas transitorias (red/servidor). El reintento es seguro:
-    /// `client_uuid` hace idempotente el `POST /orders` (una orden ya recibida responde
-    /// 200 y no se duplica). Un 401 se propaga para forzar re-login.
+    /// fallaron por causas TRANSITORIAS (red/timeout/5xx) — esas se reintentan. Un error
+    /// PERMANENTE (400/404) marca la orden como rechazada y deja de reintentarla. Un 401
+    /// se propaga para forzar re-login. El reintento es idempotente por `client_uuid`.
     @discardableResult
     func pushConfirmedOrders() async throws -> Int {
         let repo = ordersRepo
@@ -170,6 +170,8 @@ final class SyncEngine: ObservableObject {
                 AppLog.sync.info("orden \(order.clientUUID, privacy: .public) sincronizada")
             } catch APIError.unauthorized {
                 throw APIError.unauthorized   // token expirado → detener y re-login
+            } catch let error as APIError where error.isPermanent {
+                rejectOrder(order, error: error, repo: repo)   // 400/404: no se reintenta
             } catch {
                 failed += 1                   // transitorio: se reintenta (mismo UUID)
                 AppLog.sync.error("orden \(order.clientUUID, privacy: .public) no se pudo subir: \(String(describing: error), privacy: .public)")
@@ -179,7 +181,7 @@ final class SyncEngine: ObservableObject {
     }
 
     /// Sube UNA orden confirmada (p. ej. un vencido que el vendedor decide enviar). Viaja
-    /// con su `taken_at` original. Devuelve `true` si se sincronizó.
+    /// con su `taken_at` original. Un error permanente la marca rechazada. `true` si subió.
     @discardableResult
     func pushOrder(_ order: Order) async -> Bool {
         let repo = ordersRepo
@@ -189,10 +191,20 @@ final class SyncEngine: ObservableObject {
             try repo.markSynced(orderUUID: order.clientUUID, orderNumber: accepted.orderNumber)
             AppLog.sync.info("orden \(order.clientUUID, privacy: .public) enviada (individual)")
             return true
+        } catch let error as APIError where error.isPermanent {
+            rejectOrder(order, error: error, repo: repo)
+            return false
         } catch {
             AppLog.sync.error("orden \(order.clientUUID, privacy: .public) no se pudo enviar: \(String(describing: error), privacy: .public)")
             return false
         }
+    }
+
+    /// Marca una orden como rechazada con el motivo del servidor (o uno genérico).
+    private func rejectOrder(_ order: Order, error: APIError, repo: OrdersRepository) {
+        let reason = error.serverMessage ?? "El servidor rechazó la orden (\(error.serverStatus))."
+        try? repo.markRejected(orderUUID: order.clientUUID, reason: reason)
+        AppLog.sync.error("orden \(order.clientUUID, privacy: .public) RECHAZADA: \(reason, privacy: .public)")
     }
 
     // MARK: - Bajada

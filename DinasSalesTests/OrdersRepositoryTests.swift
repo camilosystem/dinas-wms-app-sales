@@ -310,4 +310,51 @@ final class OrdersRepositoryTests: XCTestCase {
         }
         XCTAssertNotNil(try repo.order(uuid: "ORD-1"), "una sincronizada es un registro; no se borra")
     }
+
+    // MARK: - Órdenes rechazadas (error permanente) — requieren atención
+
+    func test_rechazada_seMuestraConMotivo_yNoCuentaComoConfirmada() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try confirmedOrder(db, uuid: "ORD-1", daysAgo: 0)
+        let repo = OrdersRepository(database: db, now: { self.ahora })
+
+        try repo.markRejected(orderUUID: "ORD-1", reason: "Cliente inválido")
+
+        let rechazadas = try repo.rejectedOrders()
+        XCTAssertEqual(rechazadas.map(\.clientUUID), ["ORD-1"])
+        XCTAssertEqual(rechazadas.first?.rejectionReason, "Cliente inválido")
+        // No cuenta en el badge de pendientes (no es confirmada).
+        XCTAssertTrue(try repo.confirmedOrders().isEmpty)
+    }
+
+    func test_rechazada_sePuedeDescartar_soloExplicitamente() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try confirmedOrder(db, uuid: "ORD-1", daysAgo: 0)
+        let repo = OrdersRepository(database: db, now: { self.ahora })
+        try repo.markRejected(orderUUID: "ORD-1", reason: "Motivo")
+
+        // Leer las rechazadas NO borra nada.
+        _ = try repo.rejectedOrders()
+        XCTAssertNotNil(try repo.order(uuid: "ORD-1"))
+
+        // Solo el descarte explícito la elimina.
+        try repo.discardOrder(orderUUID: "ORD-1")
+        XCTAssertNil(try repo.order(uuid: "ORD-1"))
+    }
+
+    func test_reopenRejected_vuelveABorradorParaCorregir() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db)
+        try confirmedOrder(db, uuid: "ORD-1", daysAgo: 0)
+        let repo = OrdersRepository(database: db, now: { self.ahora })
+        try repo.markRejected(orderUUID: "ORD-1", reason: "Motivo")
+
+        try repo.reopenRejected(orderUUID: "ORD-1")
+
+        let order = try repo.order(uuid: "ORD-1")
+        XCTAssertEqual(order?.status, .draft)
+        XCTAssertNil(order?.rejectionReason)
+    }
 }

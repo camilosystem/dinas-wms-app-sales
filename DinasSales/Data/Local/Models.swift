@@ -92,10 +92,13 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
 // MARK: - Order (local)
 
 /// Estado local de una orden: borrador → confirmada → sincronizada.
+/// `rejected` = el middleware la rechazó con un error PERMANENTE (400/404): no se
+/// reintenta; el vendedor debe corregirla o descartarla.
 enum OrderStatus: String, Codable {
     case draft          // borrador
     case confirmed      // confirmada (taken_at), pendiente de subir
     case synced         // sincronizada con el middleware
+    case rejected       // rechazada por error permanente (no se reintenta)
 }
 
 /// Orden tomada por el vendedor. Modelo LOCAL; se transforma a `OrderCreate` al subir.
@@ -111,6 +114,7 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
     var takenAt: Date?          // momento en que se confirmó offline (taken_at del contrato)
     var syncedAt: Date?         // cuándo el middleware la aceptó
     var orderNumber: String?    // número interno devuelto por el middleware
+    var rejectionReason: String? // motivo del rechazo (si status = .rejected)
 
     var id: String { clientUUID }
 
@@ -124,6 +128,7 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
         case takenAt = "taken_at"
         case syncedAt = "synced_at"
         case orderNumber = "order_number"
+        case rejectionReason = "rejection_reason"
     }
 }
 

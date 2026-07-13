@@ -90,7 +90,7 @@ final class AuthSessionTests: XCTestCase {
     }
 
     func test_login_online_errorDeServidor_distinguido() async throws {
-        let auth = makeAuth(api: StubAuthAPI(result: .failure(APIError.server(status: 500))),
+        let auth = makeAuth(api: StubAuthAPI(result: .failure(APIError.server(status: 500, message: nil))),
                             store: InMemorySessionStore())
         auth.restore()
         await auth.login(username: "vendedor1", password: "x", isOnline: true)

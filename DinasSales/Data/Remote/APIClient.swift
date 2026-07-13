@@ -119,7 +119,7 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
     private func send<T: Decodable>(_ request: URLRequest, decode: T.Type) async throws -> T {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw APIError.server(status: -1)
+            throw APIError.server(status: -1, message: nil)
         }
         // Método + path + estado. Sin body ni cabeceras (evita loguear el token).
         AppLog.api.debug("\(request.httpMethod ?? "?", privacy: .public) \(request.url?.path ?? "?", privacy: .public) → \(http.statusCode, privacy: .public)")
@@ -129,14 +129,40 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
         case 401:
             throw APIError.unauthorized
         default:
-            throw APIError.server(status: http.statusCode)
+            // Rescata el mensaje del cuerpo de error del contrato ({ code, message }).
+            let message = (try? JSONCoding.decoder.decode(ErrorBody.self, from: data))?.message
+            throw APIError.server(status: http.statusCode, message: message)
         }
     }
+}
+
+/// Cuerpo de error del contrato (`Error { code, message }`).
+private struct ErrorBody: Decodable {
+    let code: String?
+    let message: String?
 }
 
 enum APIError: Error, Equatable {
     case notImplemented
     case missingBaseURL
     case unauthorized
-    case server(status: Int)
+    case server(status: Int, message: String?)
+
+    /// Error PERMANENTE: reintentar no ayuda (validación/no encontrado). 4xx salvo 401.
+    var isPermanent: Bool {
+        if case let .server(status, _) = self { return (400..<500).contains(status) }
+        return false
+    }
+
+    /// Mensaje legible del servidor, si lo hay.
+    var serverMessage: String? {
+        if case let .server(_, message) = self { return message }
+        return nil
+    }
+
+    /// Código HTTP del error de servidor (0 si no aplica).
+    var serverStatus: Int {
+        if case let .server(status, _) = self { return status }
+        return 0
+    }
 }

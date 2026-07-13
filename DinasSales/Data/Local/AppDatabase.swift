@@ -170,6 +170,13 @@ struct AppDatabase {
             try db.execute(sql: "DELETE FROM sync_state")
         }
 
+        // Órdenes rechazadas por error permanente (400/404): motivo del rechazo.
+        migrator.registerMigration("v3_orden_rechazada") { db in
+            try db.alter(table: "orders") { t in
+                t.add(column: "rejection_reason", .text)
+            }
+        }
+
         return migrator
     }
 }

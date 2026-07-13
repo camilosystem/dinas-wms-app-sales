@@ -77,7 +77,15 @@
       "Bash(git commit -q -m 'fix\\(auth\\): fallback offline si el servidor no responde + timeout corto *)",
       "Bash(git commit -q -m 'feat\\(auth+orders\\): caducidad offline 7 dias + pedidos vencidos \\(nunca se borran\\) *)",
       "Bash(perl -0pi -e 's/\\(\\\\.setQuantity\\\\\\(orderUUID: [^,]+, itemCode: [^,]+\\),\\(\\\\s*quantity:\\)/$1, priceList: 1,$2/g' DinasSalesTests/OrdersRepositoryTests.swift)",
-      "Bash(:)"
+      "Bash(:)",
+      "Bash(git commit -q -m 'feat\\(price-lists\\): contrato v0.3.0 — 3 listas de precio + $0 ordenable *)",
+      "Bash(curl -sS -m 6 -o /dev/null -w \"catalog sin token → HTTP %{http_code}\\\\n\" http://192.168.11.103:5257/v1/sync/catalog)",
+      "Bash(ping -c 2 -t 3 192.168.11.103)",
+      "Bash(awk '{print $2}')",
+      "Bash(route -n get 192.168.11.103)",
+      "Bash(ipconfig getsummary *)",
+      "Bash(perl -0pi -e 's/APIError\\\\.server\\\\\\(status: 500\\\\\\)/APIError.server\\(status: 500, message: nil\\)/g' DinasSalesTests/AuthSessionTests.swift DinasSalesTests/SyncEngineTests.swift)",
+      "Bash(git commit -q -m 'feat\\(sync\\): distinguir error permanente \\(400/404\\) de transitorio + ordenes rechazadas *)"
     ]
   }
 }
