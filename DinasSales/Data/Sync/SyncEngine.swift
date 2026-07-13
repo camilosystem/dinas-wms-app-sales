@@ -207,9 +207,20 @@ final class SyncEngine: ObservableObject {
         AppLog.sync.error("orden \(order.clientUUID, privacy: .public) RECHAZADA: \(reason, privacy: .public)")
     }
 
+    /// Borra las marcas de agua para que el PRÓXIMO sync baje el set COMPLETO (sin `since`)
+    /// y lo reconcilie. Se llama al hacer login online (el vendedor pudo cambiar).
+    func resetWatermarks() {
+        try? database.dbQueue.write { db in
+            try SyncState.deleteAll(db)
+        }
+        AppLog.sync.info("marcas de sync reseteadas (próxima bajada será completa)")
+    }
+
     // MARK: - Bajada
 
-    /// Descarga el delta de catálogo desde la última marca y lo persiste (upsert).
+    /// Descarga el catálogo. Con `since` (delta) hace upsert; sin `since` (bajada COMPLETA)
+    /// reconcilia: quita los ítems que ya no están en el servidor, salvo los referenciados
+    /// por órdenes locales (esos se conservan marcados `active = false`).
     func pullCatalog() async throws {
         let since = try watermark(for: "catalog")
         let page = try await api.fetchCatalog(since: since)
@@ -217,12 +228,16 @@ final class SyncEngine: ObservableObject {
             for item in page.items {
                 try item.save(db)   // insert o update por PK (item_code)
             }
+            if since == nil {
+                try Self.reconcileItems(db, returned: Set(page.items.map(\.itemCode)))
+            }
             try SyncState(resource: "catalog", lastSyncedAt: page.serverTime).save(db)
         }
         AppLog.sync.info("catálogo: \(page.items.count, privacy: .public) ítem(s) actualizados")
     }
 
-    /// Descarga el delta de clientes asignados y lo persiste (upsert).
+    /// Descarga los clientes asignados. Igual que el catálogo: delta = upsert; completo =
+    /// reconcilia (nunca borra un cliente con órdenes locales; lo marca `active = false`).
     func pullClients() async throws {
         let since = try watermark(for: "clients")
         let page = try await api.fetchClients(since: since)
@@ -230,9 +245,44 @@ final class SyncEngine: ObservableObject {
             for client in page.clients {
                 try client.save(db)
             }
+            if since == nil {
+                try Self.reconcileClients(db, returned: Set(page.clients.map(\.clientCode)))
+            }
             try SyncState(resource: "clients", lastSyncedAt: page.serverTime).save(db)
         }
         AppLog.sync.info("clientes: \(page.clients.count, privacy: .public) actualizados")
+    }
+
+    /// Ítems locales que ya no vienen del servidor: se borran, salvo los que tengan líneas
+    /// en órdenes locales (se conservan marcados inactivos). Nunca se pierde una transacción.
+    nonisolated static func reconcileItems(_ db: Database, returned: Set<String>) throws {
+        for item in try Item.fetchAll(db) where !returned.contains(item.itemCode) {
+            let referenced = try OrderLine
+                .filter(Column("item_code") == item.itemCode).fetchCount(db) > 0
+            if referenced {
+                var kept = item
+                kept.active = false
+                try kept.update(db)
+            } else {
+                try item.delete(db)
+            }
+        }
+    }
+
+    /// Clientes locales que ya no vienen del servidor: se borran, salvo los que tengan
+    /// órdenes locales (se conservan marcados inactivos, con la orden visible/enviable).
+    nonisolated static func reconcileClients(_ db: Database, returned: Set<String>) throws {
+        for client in try Client.fetchAll(db) where !returned.contains(client.clientCode) {
+            let referenced = try Order
+                .filter(Column("client_code") == client.clientCode).fetchCount(db) > 0
+            if referenced {
+                var kept = client
+                kept.active = false
+                try kept.update(db)
+            } else {
+                try client.delete(db)
+            }
+        }
     }
 
     /// Marca de agua (`since`) guardada para un recurso, o `nil` en la primera bajada.

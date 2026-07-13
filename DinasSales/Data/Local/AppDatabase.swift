@@ -177,6 +177,13 @@ struct AppDatabase {
             }
         }
 
+        // Flag local de cliente activo (dado de baja en SAP pero conservado por órdenes).
+        migrator.registerMigration("v4_cliente_activo") { db in
+            try db.alter(table: "clients") { t in
+                t.add(column: "active", .boolean).notNull().defaults(to: true)
+            }
+        }
+
         return migrator
     }
 }

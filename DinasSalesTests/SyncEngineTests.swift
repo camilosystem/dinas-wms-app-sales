@@ -117,10 +117,16 @@ private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI {
 @MainActor
 final class SyncEngineTests: XCTestCase {
 
-    private func makeItem(_ code: String, available: Double, active: Bool = true) -> Item {
+    nonisolated private func makeItem(_ code: String, available: Double, active: Bool = true) -> Item {
         Item(itemCode: code, name: "Item \(code)", category: nil, barcode: nil,
              priceList1: 10, priceList2: 10, priceList3: 10, stock: nil,
              available: available, imageURL: nil, active: active)
+    }
+
+    nonisolated private func makeClient(_ code: String, active: Bool = true) -> Client {
+        Client(clientCode: code, name: "Cliente \(code)", address: nil, city: nil,
+               zipcode: nil, managerName: nil, shippingRoute: nil,
+               defaultPriceList: 1, authorizedPriceLists: [1], active: active)
     }
 
     func test_pullCatalog_persisteItemsYGuardaMarcaDeAgua() async throws {
@@ -188,6 +194,112 @@ final class SyncEngineTests: XCTestCase {
             XCTAssertEqual(try Client.fetchOne(db, key: "C1")?.name, "Tienda")
             XCTAssertEqual(try SyncState.fetchOne(db, key: "clients")?.lastSyncedAt, t)
         }
+    }
+
+    // MARK: - Bajada completa reconciliadora (borra lo que ya no está en el servidor)
+
+    /// Cliente dado de baja en SAP SIN órdenes locales → se borra en la bajada completa.
+    func test_pullClients_bajadaCompleta_borraClienteSinOrdenes() async throws {
+        let db = try AppDatabase.makeInMemory()
+        // Set local previo: C1 y C2 (sin órdenes).
+        try await db.dbQueue.write { database in
+            try self.makeClient("C1").insert(database)
+            try self.makeClient("C2").insert(database)
+        }
+        // El servidor ya solo devuelve C1. sync_state vacío → bajada COMPLETA (since = nil).
+        let t = Date(timeIntervalSince1970: 100)
+        let api = StubSyncAPI(clients: ClientsPage(clients: [makeClient("C1")], serverTime: t))
+        let engine = SyncEngine(database: db, api: api)
+
+        try await engine.pullClients()
+
+        try await db.dbQueue.read { database in
+            XCTAssertNotNil(try Client.fetchOne(database, key: "C1"))
+            XCTAssertNil(try Client.fetchOne(database, key: "C2"),
+                         "sin órdenes que dependan de él → se borra")
+        }
+    }
+
+    /// Cliente dado de baja CON una orden local → NO se borra: se conserva marcado
+    /// inactivo y la orden sigue visible (nunca se pierde una transacción del vendedor).
+    func test_pullClients_bajadaCompleta_conservaClienteConOrdenes_marcaInactivo() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")   // crea C1 + I1 + orden confirmada
+        // El servidor ya no devuelve C1 (dado de baja en SAP).
+        let t = Date(timeIntervalSince1970: 100)
+        let api = StubSyncAPI(clients: ClientsPage(clients: [], serverTime: t))
+        let engine = SyncEngine(database: db, api: api)
+
+        try await engine.pullClients()
+
+        let c1 = try await db.dbQueue.read { try Client.fetchOne($0, key: "C1") }
+        XCTAssertNotNil(c1, "tiene una orden que depende de él → NO se borra")
+        XCTAssertEqual(c1?.active, false, "se conserva marcado inactivo / dado de baja")
+        // La orden sigue visible y enviable.
+        let order = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(order?.status, .confirmed, "la orden se mantiene intacta")
+    }
+
+    /// Ítem descontinuado CON líneas en una orden → se conserva marcado inactivo; otro
+    /// ítem sin líneas se borra.
+    func test_pullCatalog_bajadaCompleta_conservaItemConLineas_borraElResto() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedConfirmedOrder(db, uuid: "ORD-1")   // crea I1 con una línea
+        // Ítem I2 en la base sin líneas (huérfano de catálogo viejo).
+        try await db.dbQueue.write { database in
+            try self.makeItem("I2", available: 3).insert(database)
+        }
+        // El servidor ya no devuelve ni I1 ni I2.
+        let t = Date(timeIntervalSince1970: 100)
+        let api = StubSyncAPI(catalog: CatalogPage(items: [], serverTime: t))
+        let engine = SyncEngine(database: db, api: api)
+
+        try await engine.pullCatalog()
+
+        let i1 = try await db.dbQueue.read { try Item.fetchOne($0, key: "I1") }
+        XCTAssertNotNil(i1, "tiene líneas en una orden → NO se borra")
+        XCTAssertEqual(i1?.active, false, "se conserva marcado descontinuado")
+        let i2 = try await db.dbQueue.read { try Item.fetchOne($0, key: "I2") }
+        XCTAssertNil(i2, "sin líneas que dependan de él → se borra")
+    }
+
+    /// El delta (con `since`) NO reconcilia: no borra lo que no viene en la página.
+    func test_pullClients_delta_noBorra() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let t1 = Date(timeIntervalSince1970: 100)
+        let api = StubSyncAPI(clients: ClientsPage(clients: [makeClient("C1"), makeClient("C2")],
+                                                   serverTime: t1))
+        let engine = SyncEngine(database: db, api: api)
+        try await engine.pullClients()                       // completa: baja C1 y C2
+
+        // Segunda bajada es DELTA (manda since); trae solo C1 → C2 NO se borra.
+        let t2 = Date(timeIntervalSince1970: 200)
+        api.clients = ClientsPage(clients: [makeClient("C1")], serverTime: t2)
+        try await engine.pullClients()
+
+        try await db.dbQueue.read { database in
+            XCTAssertEqual(try Client.fetchCount(database), 2, "el delta no reconcilia")
+        }
+        XCTAssertEqual(api.lastClientsSince, .some(t1))
+    }
+
+    /// Tras `resetWatermarks()`, la próxima bajada vuelve a mandar `since = nil` (set completo).
+    func test_resetWatermarks_proximaBajadaEsCompleta() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let t = Date(timeIntervalSince1970: 1_000)
+        let api = StubSyncAPI(catalog: CatalogPage(items: [], serverTime: t),
+                              clients: ClientsPage(clients: [], serverTime: t))
+        let engine = SyncEngine(database: db, api: api)
+        try await engine.pullCatalog()                       // deja marca de agua
+
+        engine.resetWatermarks()
+
+        try await db.dbQueue.read { database in
+            XCTAssertEqual(try SyncState.fetchCount(database), 0, "las marcas se borraron")
+        }
+        try await engine.pullCatalog()
+        XCTAssertEqual(api.lastCatalogSince, .some(nil),
+                       "tras el reset, la bajada vuelve a ser completa (since = nil)")
     }
 
     // MARK: - Subida

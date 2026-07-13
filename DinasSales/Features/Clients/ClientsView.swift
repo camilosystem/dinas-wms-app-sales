@@ -40,7 +40,10 @@ struct ClientsView: View {
                 ClientDetailView(client: client)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(client.name).font(.body.weight(.medium))
+                    HStack(spacing: 6) {
+                        Text(client.name).font(.body.weight(.medium))
+                        if !client.active { InactiveClientBadge() }
+                    }
                     HStack(spacing: 6) {
                         Text(client.clientCode)
                         if let city = client.city, !city.isEmpty {
@@ -57,5 +60,18 @@ struct ClientsView: View {
     private func sync() async {
         await environment.sync.syncDown()
         viewModel.reload()
+    }
+}
+
+/// Etiqueta "Dado de baja": cliente inactivo en SAP conservado por tener órdenes locales.
+/// No se puede usar para pedidos nuevos, pero sus órdenes siguen visibles.
+struct InactiveClientBadge: View {
+    var body: some View {
+        Text("Dado de baja")
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.18))
+            .foregroundStyle(.secondary)
+            .clipShape(Capsule())
     }
 }

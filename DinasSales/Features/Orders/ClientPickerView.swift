@@ -6,8 +6,10 @@ struct ClientPickerView: View {
     let onSelect: (Client) -> Void
 
     init(database: AppDatabase, onSelect: @escaping (Client) -> Void) {
+        // Órdenes NUEVAS: solo clientes activos (los dados de baja no se pueden usar).
         _viewModel = StateObject(
-            wrappedValue: ClientsViewModel(repository: ClientsRepository(database: database))
+            wrappedValue: ClientsViewModel(repository: ClientsRepository(database: database),
+                                           activeOnly: true)
         )
         self.onSelect = onSelect
     }

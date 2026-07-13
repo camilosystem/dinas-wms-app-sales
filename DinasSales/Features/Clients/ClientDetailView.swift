@@ -6,6 +6,17 @@ struct ClientDetailView: View {
 
     var body: some View {
         List {
+            if !client.active {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text("Cliente dado de baja en SAP. Se conserva porque tiene órdenes en la app; no puedes tomarle pedidos nuevos.")
+                            .font(.callout)
+                    }
+                    .foregroundStyle(.orange)
+                }
+            }
+
             Section("Cliente") {
                 row("Código", client.clientCode)
                 row("Nombre", client.name)

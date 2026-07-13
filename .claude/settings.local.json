@@ -85,7 +85,8 @@
       "Bash(route -n get 192.168.11.103)",
       "Bash(ipconfig getsummary *)",
       "Bash(perl -0pi -e 's/APIError\\\\.server\\\\\\(status: 500\\\\\\)/APIError.server\\(status: 500, message: nil\\)/g' DinasSalesTests/AuthSessionTests.swift DinasSalesTests/SyncEngineTests.swift)",
-      "Bash(git commit -q -m 'feat\\(sync\\): distinguir error permanente \\(400/404\\) de transitorio + ordenes rechazadas *)"
+      "Bash(git commit -q -m 'feat\\(sync\\): distinguir error permanente \\(400/404\\) de transitorio + ordenes rechazadas *)",
+      "Bash(xcodebuild -project DinasSales.xcodeproj -scheme DinasSales -destination 'generic/platform=iOS Simulator' -configuration Debug build CODE_SIGN_IDENTITY=\"-\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO)"
     ]
   }
 }

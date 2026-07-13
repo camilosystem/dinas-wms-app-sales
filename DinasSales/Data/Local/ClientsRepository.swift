@@ -10,10 +10,16 @@ struct ClientsRepository {
 
     /// Clientes ordenados por nombre. Si `query` no está vacío, filtra por código,
     /// nombre, ciudad o ruta de reparto (subcadena, sin distinguir mayúsculas).
-    func clients(matching query: String) throws -> [Client] {
+    /// `activeOnly` excluye los dados de baja en SAP (para tomar órdenes NUEVAS); la
+    /// pestaña Clientes los muestra igual (marcados inactivos) porque conservan órdenes.
+    func clients(matching query: String, activeOnly: Bool = false) throws -> [Client] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return try database.dbQueue.read { db in
             var request = Client.all()
+
+            if activeOnly {
+                request = request.filter(Column("active") == true)
+            }
 
             if !trimmed.isEmpty {
                 let pattern = "%\(escapeLike(trimmed))%"

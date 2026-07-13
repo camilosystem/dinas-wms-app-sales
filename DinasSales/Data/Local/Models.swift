@@ -74,6 +74,9 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
     /// Listas que el vendedor PUEDE usar con este cliente (1 o 2). GRDB la persiste como
     /// JSON en su columna. El selector por línea solo ofrece estas.
     var authorizedPriceLists: [Int]
+    /// Flag LOCAL (el servidor no lo envía): `false` = dado de baja en SAP pero conservado
+    /// porque tiene órdenes locales. No se puede usar para pedidos nuevos.
+    var active: Bool = true
 
     var id: String { clientCode }
 
@@ -86,6 +89,27 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
         case shippingRoute = "shipping_route"
         case defaultPriceList = "default_price_list"
         case authorizedPriceLists = "authorized_price_lists"
+        case active
+    }
+}
+
+// `active` es un flag LOCAL: el JSON del servidor no lo trae. Decodificamos con
+// `decodeIfPresent` (default true) para que sirva tanto para el JSON del middleware
+// (ausente → activo) como para la fila de la base (presente → su valor). Va en una
+// extensión para NO perder el init por miembros (usado al construir Client).
+extension Client {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        clientCode = try c.decode(String.self, forKey: .clientCode)
+        name = try c.decode(String.self, forKey: .name)
+        address = try c.decodeIfPresent(String.self, forKey: .address)
+        city = try c.decodeIfPresent(String.self, forKey: .city)
+        zipcode = try c.decodeIfPresent(String.self, forKey: .zipcode)
+        managerName = try c.decodeIfPresent(String.self, forKey: .managerName)
+        shippingRoute = try c.decodeIfPresent(String.self, forKey: .shippingRoute)
+        defaultPriceList = try c.decode(Int.self, forKey: .defaultPriceList)
+        authorizedPriceLists = try c.decode([Int].self, forKey: .authorizedPriceLists)
+        active = try c.decodeIfPresent(Bool.self, forKey: .active) ?? true
     }
 }
 

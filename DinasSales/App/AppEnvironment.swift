@@ -44,6 +44,11 @@ final class AppEnvironment: ObservableObject {
                               onUnauthorized: { auth.sessionExpired() })
         self.sync = sync
 
+        // Login ONLINE → resetea las marcas de sync para que la próxima bajada sea
+        // completa y reconcilie (baja el set actual del vendedor; quita lo que ya no
+        // le corresponde, salvo lo referenciado por sus órdenes locales).
+        auth.onOnlineLogin = { [weak sync] in sync?.resetWatermarks() }
+
         self.pendingOrders = PendingOrdersObserver(database: database)
 
         // El monitor de red es SOLO informativo (banner offline). La sincronización es

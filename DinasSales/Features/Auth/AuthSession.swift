@@ -38,6 +38,10 @@ final class AuthSession: ObservableObject {
     /// Pasados 7 días sin autenticación online, se exige volver a autenticarse online.
     static let offlineSessionMaxAge: TimeInterval = 7 * 24 * 60 * 60
 
+    /// Se invoca tras un login ONLINE exitoso (el vendedor pudo cambiar) → se usa para
+    /// resetear las marcas de sync y forzar una bajada completa.
+    var onOnlineLogin: () -> Void = {}
+
     private let api: AuthAPI
     private let store: SessionStore
     private let hasher: PasswordHashing
@@ -111,6 +115,9 @@ final class AuthSession: ObservableObject {
             needsReauth = false
             state = .signedIn
             AppLog.auth.info("login exitoso")
+            // Login ONLINE: el vendedor pudo cambiar → resetea marcas para bajar el set
+            // completo y reconciliarlo en el próximo sync.
+            onOnlineLogin()
         } catch APIError.unauthorized {
             // El servidor respondió que las credenciales son inválidas: NO caer a offline.
             loginFailure = .badCredentials

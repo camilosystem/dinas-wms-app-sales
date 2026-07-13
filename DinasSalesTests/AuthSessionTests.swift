@@ -98,6 +98,42 @@ final class AuthSessionTests: XCTestCase {
         XCTAssertEqual(auth.state, .signedOut)
     }
 
+    func test_login_online_exitoso_disparaOnOnlineLogin() async {
+        let auth = makeAuth(api: StubAuthAPI(token: "jwt-1"), store: InMemorySessionStore())
+        var fired = 0
+        auth.onOnlineLogin = { fired += 1 }
+
+        await auth.login(username: "vendedor1", password: "secreta", isOnline: true)
+
+        XCTAssertEqual(auth.state, .signedIn)
+        XCTAssertEqual(fired, 1, "login online exitoso resetea las marcas de sync")
+    }
+
+    func test_login_online_fallido_noDisparaOnOnlineLogin() async {
+        let auth = makeAuth(api: StubAuthAPI(result: .failure(APIError.unauthorized)),
+                            store: InMemorySessionStore())
+        var fired = 0
+        auth.onOnlineLogin = { fired += 1 }
+
+        await auth.login(username: "vendedor1", password: "mala", isOnline: true)
+
+        XCTAssertEqual(fired, 0, "credenciales inválidas → no se resetean marcas")
+    }
+
+    func test_login_offline_noDisparaOnOnlineLogin() async {
+        let auth = makeAuth(api: StubAuthAPI(token: "t"),
+                            store: InMemorySessionStore(session: sampleSession(password: "secreta",
+                                                                              loggedOut: true)))
+        auth.restore()
+        var fired = 0
+        auth.onOnlineLogin = { fired += 1 }
+
+        await auth.login(username: "vendedor1", password: "secreta", isOnline: false)
+
+        XCTAssertEqual(auth.state, .signedIn)
+        XCTAssertEqual(fired, 0, "el login offline NO resetea marcas (no se re-baja el set)")
+    }
+
     // MARK: - Login offline (verificando contraseña)
 
     func test_login_offline_sinCredencial_noEntra() async throws {
