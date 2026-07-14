@@ -65,6 +65,7 @@ final class SyncEngine: ObservableObject {
             let failed = try await pushConfirmedOrders()
             try await pullCatalog()
             try await pullClients()
+            try await pullOrderStatuses()
             recordSyncSuccess()
             let uploaded = max(0, pendingBefore - failed)
             feedback = Self.makeFeedback(uploaded: uploaded, failed: failed)
@@ -112,6 +113,7 @@ final class SyncEngine: ObservableObject {
         do {
             try await pullCatalog()
             try await pullClients()
+            try await pullOrderStatuses()
             recordSyncSuccess()
             feedback = SyncFeedback(message: "Datos actualizados.", isError: false)
             AppLog.sync.info("bajada completada")
@@ -255,6 +257,23 @@ final class SyncEngine: ObservableObject {
             try SyncState(resource: "clients", lastSyncedAt: page.serverTime).save(db)
         }
         AppLog.sync.info("clientes: \(page.clients.count, privacy: .public) actualizados")
+    }
+
+    /// Baja el estado ACTUAL de las órdenes del vendedor (★ v0.4.1) y actualiza las órdenes
+    /// locales ya enviadas: el admin pudo aprobar/rechazar tras el envío. Así el vendedor ve
+    /// el cambio Retenida → Aprobada/Rechazada (con el motivo del rechazo).
+    func pullOrderStatuses() async throws {
+        let since = try watermark(for: "orders")
+        let page = try await api.fetchOrderStatuses(since: since)
+        let applied = try await database.dbQueue.write { db -> Int in
+            var count = 0
+            for update in page.updates {
+                if try OrdersRepository.applyStatusUpdate(update, in: db) { count += 1 }
+            }
+            try SyncState(resource: "orders", lastSyncedAt: page.serverTime).save(db)
+            return count
+        }
+        AppLog.sync.info("órdenes: \(applied, privacy: .public) estado(s) actualizado(s) de \(page.updates.count, privacy: .public)")
     }
 
     /// Ítems locales que ya no vienen del servidor: se borran, salvo los que tengan líneas

@@ -40,6 +40,46 @@ struct ClientsPage {
     let serverTime: Date
 }
 
+/// Respuesta de `GET /sync/orders` (★ v0.4.1). Liviana: solo lo que puede cambiar DESPUÉS
+/// de enviar la orden (estado, retención, decisión del admin).
+struct OrdersSyncResponse: Decodable {
+    let serverTime: Date
+    let orders: [OrderStatusUpdate]
+
+    enum CodingKeys: String, CodingKey {
+        case serverTime = "server_time"
+        case orders
+    }
+}
+
+/// Una actualización de estado de orden (schema `OrderStatusUpdate`). Se casa con la orden
+/// local por `client_uuid`.
+struct OrderStatusUpdate: Decodable {
+    let clientUUID: String
+    let orderNumber: String?
+    let status: String?
+    let holdReason: String?
+    let decisionNote: String?
+    let decidedAt: Date?
+    let receivedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case clientUUID = "client_uuid"
+        case orderNumber = "order_number"
+        case status
+        case holdReason = "hold_reason"
+        case decisionNote = "decision_note"
+        case decidedAt = "decided_at"
+        case receivedAt = "received_at"
+    }
+}
+
+/// Página de estados de órdenes lista para aplicar (actualizaciones + marca de agua).
+struct OrdersStatusPage {
+    let updates: [OrderStatusUpdate]
+    let serverTime: Date
+}
+
 // MARK: - Subida (POST /orders)
 
 /// Cuerpo de `POST /orders` (schema `OrderCreate`).

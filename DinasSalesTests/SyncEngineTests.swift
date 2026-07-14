@@ -8,8 +8,12 @@ import GRDB
 private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
     var catalog: CatalogPage
     var clients: ClientsPage
+    /// Estados de órdenes que devuelve `GET /sync/orders` (★ v0.4.1).
+    var orderStatuses: [OrderStatusUpdate] = []
+    var ordersServerTime = Date(timeIntervalSince1970: 0)
     private(set) var lastCatalogSince: Date??
     private(set) var lastClientsSince: Date??
+    private(set) var lastOrdersSince: Date??
 
     /// UUIDs de órdenes que recibió `postOrder` (para verificar reintentos).
     private(set) var postedUUIDs: [String] = []
@@ -38,6 +42,12 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
         return clients
     }
 
+    func fetchOrderStatuses(since: Date?) async throws -> OrdersStatusPage {
+        if let fetchError { throw fetchError }
+        lastOrdersSince = since
+        return OrdersStatusPage(updates: orderStatuses, serverTime: ordersServerTime)
+    }
+
     func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO {
         if let postError { throw postError }
         postedUUIDs.append(order.clientUUID)
@@ -61,6 +71,9 @@ private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI, @unchecked Sen
     }
     func fetchClients(since: Date?) async throws -> ClientsPage {
         ClientsPage(clients: [], serverTime: Date(timeIntervalSince1970: 0))
+    }
+    func fetchOrderStatuses(since: Date?) async throws -> OrdersStatusPage {
+        OrdersStatusPage(updates: [], serverTime: Date(timeIntervalSince1970: 0))
     }
 
     func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO {
@@ -93,6 +106,9 @@ private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI {
     }
     func fetchClients(since: Date?) async throws -> ClientsPage {
         ClientsPage(clients: [], serverTime: Date(timeIntervalSince1970: 0))
+    }
+    func fetchOrderStatuses(since: Date?) async throws -> OrdersStatusPage {
+        OrdersStatusPage(updates: [], serverTime: Date(timeIntervalSince1970: 0))
     }
 
     func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO {
@@ -300,6 +316,111 @@ final class SyncEngineTests: XCTestCase {
         try await engine.pullCatalog()
         XCTAssertEqual(api.lastCatalogSince, .some(nil),
                        "tras el reset, la bajada vuelve a ser completa (since = nil)")
+    }
+
+    // MARK: - Seguimiento del ciclo de vida (★ v0.4.1: GET /sync/orders)
+
+    /// Seed: una orden YA ENVIADA (.synced) y RETENIDA por cartera (mora).
+    private func seedHeldSyncedOrder(_ db: AppDatabase, uuid: String) throws {
+        let repo = OrdersRepository(database: db, now: { Date(timeIntervalSince1970: 0) },
+                                    makeUUID: { uuid })
+        try db.dbQueue.write { database in
+            try self.makeClient("C1").insert(database)
+            try self.makeItem("I1", available: 5).insert(database)
+        }
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 2)
+        try repo.confirm(orderUUID: order.clientUUID)
+        try repo.markSynced(orderUUID: uuid, orderNumber: "N-1",
+                            creditVerdict: .retenidaCartera, holdReason: .mora)
+    }
+
+    private func statusUpdate(_ uuid: String, status: String, note: String? = nil,
+                              holdReason: String? = nil) -> OrderStatusUpdate {
+        OrderStatusUpdate(clientUUID: uuid, orderNumber: "N-1", status: status,
+                          holdReason: holdReason, decisionNote: note,
+                          decidedAt: Date(timeIntervalSince1970: 100), receivedAt: nil)
+    }
+
+    func test_pullOrderStatuses_retenida_aprobada_seVeAprobada() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedHeldSyncedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        api.orderStatuses = [statusUpdate("ORD-1", status: "APROBADA")]
+        let engine = SyncEngine(database: db, api: api)
+
+        try await engine.pullOrderStatuses()
+
+        let o = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(o?.creditVerdict, .aprobada, "el admin la aprobó → la app la muestra Aprobada")
+        XCTAssertNil(o?.holdReason, "ya no está retenida")
+        XCTAssertEqual(o?.status, .synced, "el ciclo local de envío no cambia")
+    }
+
+    func test_pullOrderStatuses_retenida_rechazada_seVeRechazadaConMotivo() async throws {
+        let db = try AppDatabase.makeInMemory()
+        try seedHeldSyncedOrder(db, uuid: "ORD-1")
+        let api = StubSyncAPI()
+        api.orderStatuses = [statusUpdate("ORD-1", status: "RECHAZADA",
+                                          note: "Cliente en mora sin acuerdo de pago")]
+        let engine = SyncEngine(database: db, api: api)
+
+        try await engine.pullOrderStatuses()
+
+        let o = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(o?.creditVerdict, .rechazada)
+        XCTAssertEqual(o?.decisionNote, "Cliente en mora sin acuerdo de pago",
+                       "el vendedor ve el motivo para explicárselo al cliente")
+        XCTAssertNotNil(o?.decidedAt)
+        XCTAssertNil(o?.holdReason)
+    }
+
+    func test_pullOrderStatuses_ignoraOrdenNoEnviada() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let repo = OrdersRepository(database: db, now: { Date(timeIntervalSince1970: 0) },
+                                    makeUUID: { "ORD-1" })
+        try await db.dbQueue.write { database in
+            try self.makeClient("C1").insert(database)
+            try self.makeItem("I1", available: 5).insert(database)
+        }
+        let order = try repo.startOrder(clientCode: "C1")   // borrador → confirmada, SIN enviar
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 1)
+        try repo.confirm(orderUUID: order.clientUUID)
+
+        let api = StubSyncAPI()
+        api.orderStatuses = [statusUpdate("ORD-1", status: "APROBADA")]
+        let engine = SyncEngine(database: db, api: api)
+        try await engine.pullOrderStatuses()
+
+        let o = try await db.dbQueue.read { try Order.fetchOne($0, key: "ORD-1") }
+        XCTAssertEqual(o?.status, .confirmed, "no se pisa una orden que aún no se envió")
+        XCTAssertNil(o?.creditVerdict)
+    }
+
+    func test_pullOrderStatuses_guardaMarcaYReenviaSince() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let api = StubSyncAPI()
+        api.ordersServerTime = Date(timeIntervalSince1970: 500)
+        let engine = SyncEngine(database: db, api: api)
+
+        try await engine.pullOrderStatuses()
+        XCTAssertEqual(api.lastOrdersSince, .some(nil), "primera bajada: since nil")
+        let mark = try await db.dbQueue.read { try SyncState.fetchOne($0, key: "orders")?.lastSyncedAt }
+        XCTAssertEqual(mark, Date(timeIntervalSince1970: 500))
+
+        // Segunda bajada reenvía la marca como since.
+        try await engine.pullOrderStatuses()
+        XCTAssertEqual(api.lastOrdersSince, .some(Date(timeIntervalSince1970: 500)))
+    }
+
+    func test_syncDown_incluyeBajadaDeEstadosDeOrden() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let api = StubSyncAPI()
+        let engine = SyncEngine(database: db, api: api)
+
+        await engine.syncDown()
+
+        XCTAssertNotNil(api.lastOrdersSince, "syncDown consulta /sync/orders")
     }
 
     // MARK: - Subida

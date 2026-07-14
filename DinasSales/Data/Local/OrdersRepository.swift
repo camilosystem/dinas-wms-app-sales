@@ -97,6 +97,35 @@ struct OrdersRepository {
         }
     }
 
+    /// Aplica a una orden local YA ENVIADA (`.synced`) el estado ACTUAL bajado de
+    /// `GET /sync/orders` (★ v0.4.1): refresca el veredicto de cartera y la decisión del
+    /// admin (aprobó/rechazó + motivo). Núcleo ESTÁTICO para usarse dentro de una
+    /// transacción de sincronización (sin abrir otra escritura anidada). `true` si actualizó.
+    ///
+    /// Solo toca órdenes `.synced`: no pisa borradores, confirmadas sin enviar, ni las
+    /// rechazadas por error permanente (esas nunca entraron al ciclo del servidor).
+    @discardableResult
+    static func applyStatusUpdate(_ update: OrderStatusUpdate, in db: Database) throws -> Bool {
+        guard var order = try Order.fetchOne(db, key: update.clientUUID),
+              order.status == .synced else { return false }
+        if let verdict = update.status.flatMap(CreditVerdict.init(rawValue:)) {
+            order.creditVerdict = verdict
+        }
+        // Al aprobar/rechazar, el servidor deja de enviar hold_reason (ya no está retenida).
+        order.holdReason = update.holdReason.flatMap(HoldReason.init(rawValue:))
+        order.decisionNote = update.decisionNote
+        order.decidedAt = update.decidedAt
+        if let number = update.orderNumber { order.orderNumber = number }
+        try order.update(db)
+        return true
+    }
+
+    /// Conveniencia (tests): aplica una actualización en su propia transacción.
+    @discardableResult
+    func applyStatusUpdate(_ update: OrderStatusUpdate) throws -> Bool {
+        try database.dbQueue.write { try Self.applyStatusUpdate(update, in: $0) }
+    }
+
     /// Marca una orden como RECHAZADA por un error permanente (400/404) con su motivo.
     /// Deja de reintentarse; el vendedor decidirá corregirla o descartarla. Nunca toca
     /// una ya sincronizada.

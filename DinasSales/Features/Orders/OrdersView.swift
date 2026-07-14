@@ -264,6 +264,11 @@ private struct OrderRow: View {
                          + (summary.order.holdReason.map { " · \($0.label)" } ?? ""))
                         .font(.caption2).foregroundStyle(.orange).lineLimit(2)
                 }
+                // Rechazada por la oficina: se muestra el motivo (para explicárselo al cliente).
+                if summary.order.creditVerdict == .rechazada {
+                    Text(summary.order.decisionNote ?? "Rechazada por la oficina")
+                        .font(.caption2).foregroundStyle(.red).lineLimit(2)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {

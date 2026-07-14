@@ -237,9 +237,16 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
     var orderNumber: String?    // número interno devuelto por el middleware
     var rejectionReason: String? // motivo del error permanente (si status = .rejected)
     /// Veredicto de cartera del middleware (★ v0.4.0). `nil` hasta enviarse.
+    /// Se ACTUALIZA en cada sync vía `GET /sync/orders` (★ v0.4.1): el admin pudo
+    /// aprobar/rechazar después de enviada.
     var creditVerdict: CreditVerdict?
     /// Motivo de la retención (si `creditVerdict == .retenidaCartera`).
     var holdReason: HoldReason?
+    /// Nota del aprobador o MOTIVO del rechazo (★ v0.4.1). El vendedor se lo explica al
+    /// cliente. Presente cuando el admin ya decidió (aprobó/rechazó).
+    var decisionNote: String?
+    /// Cuándo el admin decidió (★ v0.4.1).
+    var decidedAt: Date?
 
     var id: String { clientUUID }
 
@@ -256,6 +263,8 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
         case rejectionReason = "rejection_reason"
         case creditVerdict = "credit_verdict"
         case holdReason = "hold_reason"
+        case decisionNote = "decision_note"
+        case decidedAt = "decided_at"
     }
 }
 

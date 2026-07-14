@@ -14,6 +14,8 @@ protocol AuthAPI: Sendable {
 protocol SyncDownAPI: Sendable {
     func fetchCatalog(since: Date?) async throws -> CatalogPage
     func fetchClients(since: Date?) async throws -> ClientsPage
+    /// `GET /sync/orders` (★ v0.4.1). Estado actual de las órdenes del vendedor (delta).
+    func fetchOrderStatuses(since: Date?) async throws -> OrdersStatusPage
 }
 
 /// Superficie de sincronización de subida (requiere token).
@@ -73,6 +75,14 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI {
                                       query: sinceQuery(since))
         let resp = try await send(request, decode: ClientsSyncResponse.self)
         return ClientsPage(clients: resp.clients, serverTime: resp.serverTime)
+    }
+
+    /// `GET /sync/orders`. Estado actual de las órdenes del vendedor (delta por `since`).
+    func fetchOrderStatuses(since: Date?) async throws -> OrdersStatusPage {
+        let request = try makeRequest(path: "sync/orders", method: "GET",
+                                      query: sinceQuery(since))
+        let resp = try await send(request, decode: OrdersSyncResponse.self)
+        return OrdersStatusPage(updates: resp.orders, serverTime: resp.serverTime)
     }
 
     // MARK: - Sync subida

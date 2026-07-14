@@ -40,6 +40,25 @@ struct OrderReadOnlyView: View {
                 }
             }
 
+            // Rechazada por la oficina (★ v0.4.1): motivo para explicárselo al cliente.
+            if viewModel.order.creditVerdict == .rechazada {
+                Section("Orden rechazada") {
+                    Text(viewModel.order.decisionNote ?? "La oficina rechazó la orden.")
+                        .foregroundStyle(.red)
+                    decidedAtFootnote
+                }
+            }
+
+            // Aprobada por la oficina: si dejó una nota, se muestra.
+            if viewModel.order.creditVerdict == .aprobada,
+               let note = viewModel.order.decisionNote, !note.isEmpty {
+                Section("Aprobada por la oficina") {
+                    Text(note)
+                    decidedAtFootnote
+                }
+            }
+
+            // Rechazo por error PERMANENTE de envío (400/404), distinto de la decisión de cartera.
             if status == .rejected, let reason = viewModel.order.rejectionReason {
                 Section("Motivo del rechazo") {
                     Text(reason).foregroundStyle(.red)
@@ -73,6 +92,15 @@ struct OrderReadOnlyView: View {
         .navigationTitle("Orden")
         .navigationBarTitleDisplayModeInlineCompat()
         .task { viewModel.reload() }
+    }
+
+    /// "Decidida el …" con la fecha de la decisión del admin, si hay.
+    @ViewBuilder
+    private var decidedAtFootnote: some View {
+        if let at = viewModel.order.decidedAt {
+            Text("Decidida el \(at.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 

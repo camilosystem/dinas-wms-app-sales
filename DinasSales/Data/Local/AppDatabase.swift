@@ -227,6 +227,15 @@ struct AppDatabase {
             try db.execute(sql: "DELETE FROM sync_state")
         }
 
+        // ★ v0.4.1 — seguimiento del ciclo de vida: la decisión del admin (aprobó/rechazó)
+        // se baja vía GET /sync/orders y se guarda en la orden local.
+        migrator.registerMigration("v6_decision_admin") { db in
+            try db.alter(table: "orders") { t in
+                t.add(column: "decision_note", .text)     // nota/motivo del admin
+                t.add(column: "decided_at", .datetime)     // cuándo decidió
+            }
+        }
+
         return migrator
     }
 }
