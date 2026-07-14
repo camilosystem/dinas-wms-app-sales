@@ -87,16 +87,19 @@ struct OrderCreateDTO: Encodable {
 }
 
 /// Respuesta de `POST /orders` (schema `OrderAccepted`), para 200 y 201.
+/// ★ v0.4.0: `status` = APROBADA | RETENIDA_CARTERA; `hold_reason` explica la retención.
 struct OrderAcceptedDTO: Decodable {
     let clientUUID: String
     let orderNumber: String?
     let status: String?
+    let holdReason: String?
     let receivedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case clientUUID = "client_uuid"
         case orderNumber = "order_number"
         case status
+        case holdReason = "hold_reason"
         case receivedAt = "received_at"
     }
 }

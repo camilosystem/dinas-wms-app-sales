@@ -22,12 +22,18 @@ protocol SyncUpAPI: Sendable {
     func postOrder(_ order: Order, lines: [OrderLine]) async throws -> OrderAcceptedDTO
 }
 
+/// Superficie de cartera (★ v0.4.0, requiere token).
+protocol CreditAPI: Sendable {
+    /// `GET /clients/{code}/statement`. Estado de cuenta para consulta offline.
+    func fetchStatement(clientCode: String) async throws -> ClientStatement
+}
+
 /// Cliente HTTP contra el middleware, según `dinas-wms-contracts/openapi.yaml`.
 ///
 /// El JWT se inyecta vía `tokenProvider` y se añade como `Authorization: Bearer` en
 /// todos los endpoints salvo `login` (público). Si falta un campo/endpoint en el
 /// contrato, no se inventa: se eleva al Arquitecto.
-struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
+struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI {
     /// URL base del middleware (incluye el path base `/v1`). Ver `AppConfig`.
     var baseURL: URL?
     var session: URLSession
@@ -76,6 +82,14 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI {
         let body = try JSONCoding.encoder.encode(OrderCreateDTO(order: order, lines: lines))
         let request = try makeRequest(path: "orders", method: "POST", body: body)
         return try await send(request, decode: OrderAcceptedDTO.self)
+    }
+
+    // MARK: - Cartera (★ v0.4.0)
+
+    /// `GET /clients/{code}/statement`. Estado de cuenta del cliente.
+    func fetchStatement(clientCode: String) async throws -> ClientStatement {
+        let request = try makeRequest(path: "clients/\(clientCode)/statement", method: "GET")
+        return try await send(request, decode: ClientStatement.self)
     }
 
     // MARK: - Infra HTTP

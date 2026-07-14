@@ -24,9 +24,19 @@ struct OrderReadOnlyView: View {
         List {
             Section("Cliente") {
                 Text(viewModel.clientName)
-                OrderStatusBadge(status: status)
+                OrderStatusBadge(status: status, creditVerdict: viewModel.order.creditVerdict)
                 if let number = orderNumber {
                     HStack { Text("N.º orden").foregroundStyle(.secondary); Spacer(); Text(number) }
+                }
+            }
+
+            // Retenida por cartera: espera aprobación del admin. Se muestra el motivo.
+            if viewModel.order.creditVerdict == .retenidaCartera {
+                Section("Retenida para aprobación de cartera") {
+                    Text(viewModel.order.holdReason?.label ?? "Requiere aprobación de la oficina.")
+                        .foregroundStyle(.orange)
+                    Text("El pedido se envió y espera la decisión de la oficina.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
@@ -66,9 +76,33 @@ struct OrderReadOnlyView: View {
     }
 }
 
-/// Insignia de estado de la orden.
+/// Presentación del veredicto de cartera del servidor (colores/labels viven en la vista).
+extension CreditVerdict {
+    var label: String {
+        switch self {
+        case .sincronizada: return "Sincronizada"
+        case .retenidaCartera: return "Retenida"
+        case .aprobada: return "Aprobada"
+        case .rechazada: return "Rechazada"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .sincronizada: return .blue
+        case .retenidaCartera: return .orange   // ámbar: espera aprobación
+        case .aprobada: return .green
+        case .rechazada: return .red
+        }
+    }
+}
+
+/// Insignia de estado de la orden. Si el middleware ya emitió un VEREDICTO DE CARTERA
+/// (orden `.synced` con `creditVerdict`), muestra ese veredicto — es lo que el vendedor
+/// necesita para responderle al cliente. Si no, muestra el estado local de envío.
 struct OrderStatusBadge: View {
     let status: OrderStatus
+    var creditVerdict: CreditVerdict? = nil
 
     var body: some View {
         Text(label)
@@ -80,6 +114,7 @@ struct OrderStatusBadge: View {
     }
 
     private var label: String {
+        if status == .synced, let verdict = creditVerdict { return verdict.label }
         switch status {
         case .draft: return "Borrador"
         case .confirmed: return "Confirmada"
@@ -89,6 +124,7 @@ struct OrderStatusBadge: View {
     }
 
     private var color: Color {
+        if status == .synced, let verdict = creditVerdict { return verdict.color }
         switch status {
         case .draft: return .orange
         case .confirmed: return .blue

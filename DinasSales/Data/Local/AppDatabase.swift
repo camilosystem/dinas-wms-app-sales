@@ -184,6 +184,49 @@ struct AppDatabase {
             }
         }
 
+        // ★ v0.4.0 — CARTERA: crédito por cliente, veredicto de cartera en la orden y
+        // tabla del estado de cuenta (para consulta offline).
+        migrator.registerMigration("v5_cartera") { db in
+            // clients.credit: GRDB persiste ClientCredit como JSON en esta columna. Las
+            // filas existentes reciben un crédito en cero (se re-sincroniza en la próxima
+            // bajada; el esquema cambió → forzamos re-sync completo más abajo).
+            let zeroCredit = """
+                {"balance":0,"credit_limit":0,"credit_available":0,"overdue_count":0,\
+                "overdue_amount":0,"max_days_overdue":0,"has_overdue":false,"grace_days":0}
+                """
+            try db.alter(table: "clients") { t in
+                t.add(column: "credit", .text).notNull().defaults(to: zeroCredit)
+            }
+
+            // orders: veredicto de cartera del middleware + motivo de retención (nullables).
+            try db.alter(table: "orders") { t in
+                t.add(column: "credit_verdict", .text)
+                t.add(column: "hold_reason", .text)
+            }
+
+            // Estado de cuenta: documentos pendientes por cliente (caché offline).
+            try db.create(table: "statement_documents") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("client_code", .text).notNull()
+                    .references("clients", column: "client_code", onDelete: .cascade)
+                t.column("as_of", .datetime)
+                t.column("doc_type", .text).notNull()
+                t.column("doc_num", .text).notNull()
+                t.column("doc_date", .datetime)
+                t.column("due_date", .datetime)
+                t.column("doc_total", .double).notNull().defaults(to: 0)
+                t.column("open_amount", .double).notNull().defaults(to: 0)
+                t.column("days_overdue", .integer)
+                t.column("is_from_sage", .boolean).notNull().defaults(to: false)
+                t.column("sage_doc_number", .text)
+            }
+            try db.create(index: "idx_statement_client",
+                          on: "statement_documents", columns: ["client_code"])
+
+            // El esquema de clientes cambió (nuevo campo credit) → re-sync COMPLETO.
+            try db.execute(sql: "DELETE FROM sync_state")
+        }
+
         return migrator
     }
 }

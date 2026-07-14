@@ -79,7 +79,11 @@ struct OrdersRepository {
     }
 
     /// Marca una orden como sincronizada tras aceptarla el middleware.
-    func markSynced(orderUUID: String, orderNumber: String?) throws {
+    /// Marca la orden como sincronizada y guarda el VEREDICTO DE CARTERA del middleware
+    /// (★ v0.4.0): APROBADA o RETENIDA_CARTERA, con su motivo. El estado local sigue
+    /// siendo `.synced` (se envió con éxito); el veredicto es una dimensión aparte.
+    func markSynced(orderUUID: String, orderNumber: String?,
+                    creditVerdict: CreditVerdict? = nil, holdReason: HoldReason? = nil) throws {
         try database.dbQueue.write { db in
             guard var order = try Order.fetchOne(db, key: orderUUID) else {
                 throw OrdersError.orderNotFound
@@ -87,6 +91,8 @@ struct OrdersRepository {
             order.status = .synced
             order.syncedAt = now()
             order.orderNumber = orderNumber
+            order.creditVerdict = creditVerdict
+            order.holdReason = holdReason
             try order.update(db)
         }
     }

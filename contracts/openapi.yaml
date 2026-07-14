@@ -1,67 +1,73 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.3.0
+  version: 0.4.0
   description: >
     Contrato de la API del middleware Dinas WMS.
 
     ══════════════════════════════════════════════════════════════════════════
-    CAMBIOS EN v0.3.0 (aprobados por el Arquitecto) — CAMBIO MAYOR
+    CAMBIOS EN v0.4.0 — CARTERA Y RETENCIÓN DE ÓRDENES
     ══════════════════════════════════════════════════════════════════════════
 
-    1) REGLA DE PRECIO — CORREGIDA (¡lee esto con atención!)
+    1) DATOS DE CARTERA EN EL CLIENTE
 
-       La regla anterior ("precio null = no ordenable") queda ANULADA.
-       Regla definitiva, basada en cómo funciona SAP y la operación de Dinas:
+       Cada cliente ahora trae su información de crédito, para que la app pueda
+       ADVERTIR al vendedor OFFLINE:
+         · balance          — saldo actual (de SAP)
+         · credit_limit     — cupo
+         · credit_available — cupo disponible
+         · overdue_count / overdue_amount / max_days_overdue — mora
 
-         · SAP guarda los precios no configurados como 0 (no NULL).
-         · El flag SellItem de SAP determina si un ítem se vende.
-         · Un ítem a $0 SÍ ES ORDENABLE (muestras, material publicitario,
-           promociones — Dinas los "ordena" aunque no los cobre).
+    2) ESTADO DE CUENTA DEL CLIENTE (nuevo endpoint)
 
-       ┌────────────────────────┬──────────────────────────────────────────┐
-       │ SellItem = 'N'         │ NO llega a la app (filtrado en la vista) │
-       │ SellItem='Y' + precio  │ Ordenable al precio normal               │
-       │ SellItem='Y' + $0      │ ORDENABLE A $0 + flag has_price=false    │
-       └────────────────────────┴──────────────────────────────────────────┘
+       GET /clients/{client_code}/statement — facturas, notas de crédito y
+       pagos a cuenta pendientes. Lo baja la app para verlo offline.
 
-       · `price` YA NO ES NULLABLE. Siempre viene un número (puede ser 0).
-       · `has_price` es INFORMATIVO: permite al Dashboard resaltar los ítems
-         sin precio configurado, pero NO bloquea la venta.
-       · La app NO debe impedir ordenar un ítem a $0.
+    3) MÁQUINA DE ESTADOS DE LA ORDEN (¡inaugurada aquí!)
 
-    2) TRES LISTAS DE PRECIOS (1, 2, 3)
+       Hasta v0.3.0 toda orden llegaba a SINCRONIZADA y ahí moría.
+       Ahora:
 
-       Cada ítem trae sus precios en las 3 listas. La app los baja todos para
-       poder cambiar de lista OFFLINE.
-       (Los ListNum 1/2/3 son los códigos reales. Los NOMBRES en SAP están
-        corridos y se ignoran.)
+         SINCRONIZADA ──(cartera OK)──────────────────► APROBADA
+              │
+              └──(excede cupo o tiene mora)──► RETENIDA_CARTERA
+                                                    │
+                                     ┌──────────────┴──────────────┐
+                                     ▼                             ▼
+                                 APROBADA                     RECHAZADA
+                             (admin aprueba)              (admin rechaza)
 
-    3) LISTAS AUTORIZADAS POR CLIENTE
+       La evaluación la hace el MIDDLEWARE al recibir la orden.
 
-       Cada cliente tiene:
-         · una lista POR DEFECTO (de SAP: OCRD.ListNum), y
-         · opcionalmente UNA lista adicional autorizada (dato del MIDDLEWARE,
-           configurada por el admin desde el Dashboard).
+    4) LA REGLA DE RETENCIÓN
 
-       El vendedor puede elegir, POR LÍNEA, cualquiera de las listas
-       autorizadas para ese cliente. NO requiere aprobación posterior:
-       la autorización ya ocurrió sobre el cliente.
+       Una orden se RETIENE si:
+         (a) balance + total_de_la_orden > credit_limit   → excede cupo
+         (b) max_days_overdue > 5                          → mora
 
-       → NO hay estado de retención por lista de precios.
+       Los 5 días de gracia viven en appsettings del middleware (ajustables
+       sin recompilar). Son iguales para todos los clientes.
 
-    4) NUEVO ENDPOINT ADMIN: autorizar lista adicional por cliente.
+    5) LA APP ADVIERTE, EL MIDDLEWARE DECIDE
+
+       La app evalúa la regla LOCALMENTE (offline, con datos de la última
+       sincronización) y ADVIERTE al vendedor: "esta orden quedará retenida".
+
+       Pero NUNCA lo bloquea. El vendedor decide y sigue.
+
+       El middleware vuelve a evaluar con datos FRESCOS al recibirla.
+       Los veredictos pueden diferir (el saldo cambió desde la última sync) y
+       eso está bien: la advertencia es informativa, la decisión es del servidor.
+
+    6) ENDPOINTS DE APROBACIÓN (Dashboard)
+
+       GET  /admin/orders/held          — órdenes retenidas por cartera
+       POST /admin/orders/{uuid}/approve — aprobar
+       POST /admin/orders/{uuid}/reject  — rechazar
 
     ══════════════════════════════════════════════════════════════════════════
-    Alcance vigente
-      · Auth con roles (VENDEDOR | ADMIN).
-      · Sync de bajada (catálogo con 3 precios, clientes con listas autorizadas).
-      · Sync de subida de órdenes (idempotente, con lista de precios por línea).
-      · Consulta administrativa (órdenes, catálogo, clientes) — solo lectura.
-      · Gestión de la lista adicional autorizada por cliente.
-
-    Fuera de alcance (NO implementar): pagos, créditos, visitas, gastos,
-    promociones, cartera, picking, Deliveries, facturación a SAP.
+    Fuera de alcance (NO implementar): pagos, créditos (notas), visitas,
+    gastos, promociones, picking, Deliveries, facturación a SAP.
 
 servers:
   - url: https://api.dinas-wms.example.com/v1
@@ -71,6 +77,7 @@ tags:
   - name: auth
   - name: sync-down
   - name: sync-up
+  - name: credit
   - name: admin
 
 paths:
@@ -97,13 +104,9 @@ paths:
       tags: [sync-down]
       summary: Catálogo con los 3 precios (vendedor)
       description: >
-        Ítems creados o modificados desde 'since'. Requiere rol VENDEDOR.
-
-        Solo llegan ítems con SellItem='Y' en SAP (los 'N' se filtran en origen).
-
-        Cada ítem trae sus precios en las 3 listas. Un precio de 0 es VÁLIDO y
-        el ítem ES ORDENABLE (muestra / publicidad / promoción).
-        `available` viene YA CALCULADO por el middleware (stock - comprometido).
+        Solo llegan ítems con SellItem='Y' en SAP.
+        Un precio de 0 es VÁLIDO y el ítem ES ORDENABLE (muestra / publicidad).
+        `available` viene YA CALCULADO por el middleware.
       parameters:
         - $ref: '#/components/parameters/Since'
       responses:
@@ -123,12 +126,12 @@ paths:
   /sync/clients:
     get:
       tags: [sync-down]
-      summary: Clientes asignados al vendedor, con sus listas autorizadas
+      summary: Clientes del vendedor, CON SUS DATOS DE CARTERA
       description: >
         Solo los clientes ASIGNADOS al vendedor del token.
-        Cada cliente incluye `authorized_price_lists`: las listas que el
-        vendedor puede usar con ese cliente (la de SAP + la adicional, si el
-        admin la autorizó).
+
+        ★ v0.4.0: cada cliente incluye ahora su información de CRÉDITO
+        (balance, cupo, mora). La app la usa para ADVERTIR offline.
       parameters:
         - $ref: '#/components/parameters/Since'
       responses:
@@ -145,6 +148,44 @@ paths:
                     items: { $ref: '#/components/schemas/Client' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /clients/{client_code}/statement:
+    get:
+      tags: [credit]
+      summary: Estado de cuenta del cliente (facturas, NC, pagos)
+      description: >
+        ★ NUEVO en v0.4.0.
+
+        Documentos pendientes del cliente. La app lo baja para que el vendedor
+        pueda consultarlo OFFLINE al visitar al cliente.
+
+        · INVOICE            → open_amount POSITIVO (el cliente debe)
+        · CREDIT_NOTE        → open_amount NEGATIVO (resta deuda)
+        · PAYMENT_ON_ACCOUNT → open_amount NEGATIVO (resta deuda)
+
+        NOTA: la suma del detalle se APROXIMA al `balance`, pero puede diferir
+        por ajustes contables. **El `balance` es la cifra oficial**; el detalle
+        la desglosa. Es una herramienta comercial, no una auditoría contable.
+
+        El vendedor solo puede consultar SUS clientes (403 si no es suyo).
+      parameters:
+        - name: client_code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Estado de cuenta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientStatement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: El cliente no está asignado a este vendedor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /orders:
     post:
       tags: [sync-up]
@@ -153,11 +194,16 @@ paths:
         Idempotente por 'client_uuid'. UUID ya registrado → 200 con la orden
         existente (sin duplicar). UUID nuevo → 201.
 
-        Cada línea lleva `price_list` (1, 2 o 3): la lista que el vendedor
-        eligió PARA ESA LÍNEA. El middleware DEBE validar que sea una de las
-        listas autorizadas para ese cliente → si no, 400.
+        ★ v0.4.0: el middleware EVALÚA LA CARTERA al recibir la orden.
+        La respuesta indica en qué estado quedó:
+          · APROBADA          → cartera OK, la orden sigue su curso
+          · RETENIDA_CARTERA  → excede cupo o tiene mora; espera al admin
+
+        El campo `hold_reason` explica POR QUÉ se retuvo (para mostrárselo al
+        vendedor).
 
         `unit_price = 0` y `line_discount_pct = 100` son VÁLIDOS.
+        `price_list` debe estar entre las autorizadas del cliente (si no → 400).
       requestBody:
         required: true
         content:
@@ -165,7 +211,7 @@ paths:
             schema: { $ref: '#/components/schemas/OrderCreate' }
       responses:
         '201':
-          description: Orden creada
+          description: Orden creada (ver `status` para saber si quedó retenida)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OrderAccepted' }
@@ -191,6 +237,10 @@ paths:
         - name: client_code
           in: query
           schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/OrderStatus' }
+          description: ★ v0.4.0 — filtrar por estado.
       responses:
         '200':
           description: Página de órdenes
@@ -202,9 +252,44 @@ paths:
                   page: { type: integer }
                   page_size: { type: integer }
                   total: { type: integer }
+                  held_count:
+                    type: integer
+                    description: >
+                      ★ Cuántas órdenes están RETENIDA_CARTERA en total
+                      (no solo en esta página). Para el aviso del Dashboard.
                   orders:
                     type: array
                     items: { $ref: '#/components/schemas/OrderSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/orders/held:
+    get:
+      tags: [admin]
+      summary: Órdenes RETENIDAS por cartera (bandeja de aprobación)
+      description: >
+        ★ NUEVO en v0.4.0. REQUIERE rol ADMIN.
+
+        Atajo de /admin/orders?status=RETENIDA_CARTERA, pero enriquecido:
+        cada orden trae el CONTEXTO DE CARTERA del cliente (saldo, cupo, mora,
+        cuánto viene de Sage) para que el admin pueda decidir sin salir de aquí.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Órdenes retenidas con su contexto de cartera
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page: { type: integer }
+                  page_size: { type: integer }
+                  total: { type: integer }
+                  orders:
+                    type: array
+                    items: { $ref: '#/components/schemas/HeldOrder' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -228,14 +313,102 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /admin/orders/{client_uuid}/approve:
+    post:
+      tags: [admin]
+      summary: APROBAR una orden retenida
+      description: >
+        ★ NUEVO en v0.4.0. REQUIERE rol ADMIN.
+
+        RETENIDA_CARTERA → APROBADA.
+
+        Solo se puede aprobar una orden que esté RETENIDA_CARTERA.
+        Si ya está APROBADA o RECHAZADA → 409 (conflicto de estado).
+
+        Queda registro de QUIÉN aprobó y CUÁNDO.
+      parameters:
+        - name: client_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  description: Nota del aprobador (opcional, queda en el registro).
+      responses:
+        '200':
+          description: Orden aprobada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: La orden no está en un estado que permita aprobarla
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/orders/{client_uuid}/reject:
+    post:
+      tags: [admin]
+      summary: RECHAZAR una orden retenida
+      description: >
+        ★ NUEVO en v0.4.0. REQUIERE rol ADMIN.
+
+        RETENIDA_CARTERA → RECHAZADA.
+
+        El MOTIVO es OBLIGATORIO: el vendedor debe poder explicarle al cliente
+        por qué su pedido no procedió.
+
+        Si ya está APROBADA o RECHAZADA → 409.
+      parameters:
+        - name: client_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Motivo del rechazo. OBLIGATORIO.
+                    El vendedor lo verá y podrá explicárselo al cliente.
+      responses:
+        '200':
+          description: Orden rechazada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: La orden no está en un estado que permita rechazarla
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /admin/catalog:
     get:
       tags: [admin]
       summary: Catálogo completo con los 3 precios
-      description: >
-        REQUIERE rol ADMIN. Incluye los ítems a $0 (con `has_price_*: false`),
-        para que el administrador pueda detectarlos y decidir si les falta
-        precio o si son muestras/publicidad.
+      description: REQUIERE rol ADMIN. Incluye los ítems a $0.
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
@@ -245,9 +418,6 @@ paths:
         - name: only_without_price
           in: query
           schema: { type: boolean, default: false }
-          description: >
-            Si true, devuelve SOLO los ítems sin precio en ninguna lista.
-            Atajo para que el admin los revise.
       responses:
         '200':
           description: Página de ítems
@@ -259,11 +429,7 @@ paths:
                   page: { type: integer }
                   page_size: { type: integer }
                   total: { type: integer }
-                  without_price_count:
-                    type: integer
-                    description: >
-                      Cuántos ítems (del total, no de la página) no tienen precio
-                      en ninguna lista. Para que el Dashboard lo muestre como aviso.
+                  without_price_count: { type: integer }
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/AdminCatalogItem' }
@@ -273,7 +439,7 @@ paths:
   /admin/clients:
     get:
       tags: [admin]
-      summary: Todos los clientes, con sus listas autorizadas
+      summary: Todos los clientes, con listas autorizadas y CARTERA
       description: REQUIERE rol ADMIN.
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -281,6 +447,10 @@ paths:
         - name: search
           in: query
           schema: { type: string }
+        - name: only_overdue
+          in: query
+          schema: { type: boolean, default: false }
+          description: ★ v0.4.0 — solo clientes con mora (>5 días).
       responses:
         '200':
           description: Página de clientes
@@ -292,6 +462,9 @@ paths:
                   page: { type: integer }
                   page_size: { type: integer }
                   total: { type: integer }
+                  overdue_count:
+                    type: integer
+                    description: ★ Cuántos clientes tienen mora (en total).
                   clients:
                     type: array
                     items: { $ref: '#/components/schemas/AdminClient' }
@@ -301,17 +474,8 @@ paths:
   /admin/clients/{client_code}/price-list:
     put:
       tags: [admin]
-      summary: Autorizar (o quitar) la lista de precios adicional de un cliente
-      description: >
-        REQUIERE rol ADMIN.
-
-        Cada cliente tiene su lista POR DEFECTO (de SAP, inmutable desde aquí)
-        y puede tener UNA lista adicional autorizada.
-
-        Enviar `additional_price_list: null` quita la autorización.
-        La lista adicional debe ser distinta de la por defecto (si no → 400).
-
-        Este dato vive en el MIDDLEWARE, no en SAP.
+      summary: Autorizar (o quitar) la lista de precios adicional
+      description: REQUIERE rol ADMIN.
       parameters:
         - name: client_code
           in: path
@@ -329,17 +493,36 @@ paths:
                   type: integer
                   enum: [1, 2, 3]
                   nullable: true
-                  description: >
-                    Lista adicional autorizada. `null` quita la autorización.
-                    Debe ser distinta de la lista por defecto del cliente.
       responses:
         '200':
           description: Autorización actualizada
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AdminClient' }
-        '400':
-          $ref: '#/components/responses/BadRequest'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/clients/{client_code}/statement:
+    get:
+      tags: [admin]
+      summary: Estado de cuenta del cliente (vista admin)
+      description: >
+        ★ NUEVO en v0.4.0. REQUIERE rol ADMIN.
+        Igual que /clients/{code}/statement pero SIN el filtro de vendedor:
+        el admin puede consultar cualquier cliente.
+      parameters:
+        - name: client_code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Estado de cuenta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientStatement' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -397,17 +580,37 @@ components:
 
     OrderStatus:
       type: string
-      enum: [SINCRONIZADA]
+      enum: [SINCRONIZADA, RETENIDA_CARTERA, APROBADA, RECHAZADA]
       description: >
-        La máquina de estados completa (RETENIDA_CARTERA, EN_RUTA, FACTURADA...)
-        llega en versiones posteriores.
+        ★ v0.4.0 — Máquina de estados inaugurada.
+
+          SINCRONIZADA      Estado transitorio al recibirla. El middleware
+                            evalúa la cartera y la mueve de inmediato.
+          RETENIDA_CARTERA  Excede cupo o tiene mora. Espera decisión del admin.
+          APROBADA          Cartera OK, o el admin la liberó. Sigue su curso.
+          RECHAZADA         El admin la rechazó. No procede.
+
+        Transiciones válidas:
+          SINCRONIZADA     → APROBADA | RETENIDA_CARTERA   (automático)
+          RETENIDA_CARTERA → APROBADA | RECHAZADA          (acción del admin)
+          APROBADA         → (final por ahora)
+          RECHAZADA        → (final)
+
+        (Estados futuros del diseño — NO implementar aún: EN_RUTA, EN_PICKING,
+         ALISTADA, FACTURADA, ENTREGADA, RETENIDA_DESCUENTO...)
+
+    HoldReason:
+      type: string
+      enum: [CUPO_EXCEDIDO, MORA, CUPO_Y_MORA]
+      description: >
+        Por qué se retuvo la orden.
+          CUPO_EXCEDIDO  balance + total de la orden > credit_limit
+          MORA           tiene facturas vencidas más allá de los días de gracia
+          CUPO_Y_MORA    ambas
 
     PriceListNumber:
       type: integer
       enum: [1, 2, 3]
-      description: >
-        Número de lista de precios (ListNum real de SAP).
-        Los NOMBRES de las listas en SAP están corridos y se ignoran.
 
     LoginRequest:
       type: object
@@ -422,10 +625,7 @@ components:
       properties:
         token: { type: string }
         role: { $ref: '#/components/schemas/Role' }
-        salesperson_code:
-          type: string
-          nullable: true
-          description: Presente solo si role=VENDEDOR.
+        salesperson_code: { type: string, nullable: true }
         display_name: { type: string }
 
     CatalogItem:
@@ -436,43 +636,22 @@ components:
         name: { type: string }
         category: { type: string }
         barcode: { type: string }
-
-        # ── PRECIOS: los 3, NO nullable. 0 es válido y ORDENABLE. ──
-        price_list_1:
-          type: number
-          format: double
-          description: Precio en la lista 1. 0 = sin precio configurado, pero ORDENABLE.
-        price_list_2:
-          type: number
-          format: double
-        price_list_3:
-          type: number
-          format: double
-
-        # ── FLAGS INFORMATIVOS (no bloquean la venta) ──
-        has_price_1:
-          type: boolean
-          description: >
-            false si el precio en esa lista es 0 (sin configurar).
-            INFORMATIVO: la app NO debe impedir ordenar por esto.
+        price_list_1: { type: number, format: double }
+        price_list_2: { type: number, format: double }
+        price_list_3: { type: number, format: double }
+        has_price_1: { type: boolean }
         has_price_2: { type: boolean }
         has_price_3: { type: boolean }
-
-        stock:
-          type: number
-          format: double
-        available:
-          type: number
-          format: double
-          description: Calculado por el middleware (stock - comprometido).
+        stock: { type: number, format: double }
+        available: { type: number, format: double }
         image_url: { type: string }
-        active:
-          type: boolean
-          description: Si false, la app no lo muestra.
+        active: { type: boolean }
 
+    # ═══════════════ CLIENTE CON CARTERA (★ v0.4.0) ═══════════════
     Client:
       type: object
-      required: [client_code, name, default_price_list, authorized_price_lists]
+      required:
+        [client_code, name, default_price_list, authorized_price_lists, credit]
       properties:
         client_code: { type: string }
         name: { type: string }
@@ -480,29 +659,122 @@ components:
         city: { type: string }
         zipcode: { type: string }
         manager_name: { type: string }
-        shipping_route: { type: string }
-
-        default_price_list:
-          $ref: '#/components/schemas/PriceListNumber'
+        shipping_route:
+          type: string
+          description: Código de ruta/día de entrega (de OCRD.U_RSAP_ROUTE).
+        default_price_list: { $ref: '#/components/schemas/PriceListNumber' }
         authorized_price_lists:
           type: array
           minItems: 1
           maxItems: 2
           items: { $ref: '#/components/schemas/PriceListNumber' }
+        credit:
+          $ref: '#/components/schemas/ClientCredit'
+          # ★ v0.4.0 — la app lo usa para ADVERTIR offline.
+
+    ClientCredit:
+      type: object
+      required: [balance, credit_limit, credit_available]
+      description: >
+        Situación de cartera del cliente. La app la usa para ADVERTIR al
+        vendedor sin conexión.
+
+        ⚠️ Estos datos son de la ÚLTIMA SINCRONIZACIÓN. Pueden estar
+        desactualizados. El middleware re-evalúa con datos frescos al recibir
+        la orden. **La app advierte; el middleware decide.**
+      properties:
+        balance:
+          type: number
+          format: double
           description: >
-            Listas que el vendedor PUEDE usar con este cliente.
-            Siempre incluye la `default_price_list`. Si el admin autorizó una
-            lista adicional, también la incluye (máximo 2).
-            La app debe permitir elegir SOLO entre estas.
+            Saldo actual del cliente (de SAP). ES LA CIFRA OFICIAL.
+        credit_limit:
+          type: number
+          format: double
+          description: Cupo de crédito.
+        credit_available:
+          type: number
+          format: double
+          description: credit_limit − balance. Puede ser NEGATIVO (ya lo excedió).
+        overdue_count:
+          type: integer
+          description: Cuántas facturas tiene vencidas (más allá de la gracia).
+        overdue_amount:
+          type: number
+          format: double
+          description: Monto total vencido.
+        max_days_overdue:
+          type: integer
+          description: >
+            Días de atraso de la factura MÁS vencida.
+            El middleware compara esto contra los días de gracia (5).
+        has_overdue:
+          type: boolean
+          description: >
+            Conveniencia: true si max_days_overdue supera los días de gracia.
+            Calculado por el middleware (la app NO debe recalcular el umbral).
+        grace_days:
+          type: integer
+          description: >
+            Días de gracia vigentes (hoy 5). El middleware los envía para que la
+            app pueda explicárselo al vendedor, no para que los recalcule.
+
+    # ═══════════════ ESTADO DE CUENTA (★ v0.4.0) ═══════════════
+    ClientStatement:
+      type: object
+      properties:
+        client_code: { type: string }
+        client_name: { type: string }
+        credit:
+          $ref: '#/components/schemas/ClientCredit'
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/StatementDocument' }
+        as_of:
+          type: string
+          format: date-time
+          description: Cuándo se tomó esta foto de la cartera.
+
+    StatementDocument:
+      type: object
+      properties:
+        doc_type:
+          type: string
+          enum: [INVOICE, CREDIT_NOTE, PAYMENT_ON_ACCOUNT]
+        doc_num: { type: string }
+        doc_date: { type: string, format: date }
+        due_date:
+          type: string
+          format: date
+          nullable: true
+          description: NULL para notas de crédito y pagos (no vencen).
+        doc_total: { type: number, format: double }
+        open_amount:
+          type: number
+          format: double
+          description: >
+            POSITIVO para facturas (el cliente debe).
+            NEGATIVO para notas de crédito y pagos (restan deuda).
+        days_overdue:
+          type: integer
+          nullable: true
+          description: >
+            Días de atraso. Negativo = aún no vence. NULL para NC y pagos.
+        is_from_sage:
+          type: boolean
+          description: >
+            true si viene de la migración de Sage (dato informativo).
+            La deuda cuenta igual, venga de donde venga.
+        sage_doc_number:
+          type: string
+          nullable: true
+          description: Número original en Sage, si aplica.
 
     OrderCreate:
       type: object
       required: [client_uuid, client_code, lines]
       properties:
-        client_uuid:
-          type: string
-          format: uuid
-          description: UUID generado en el DISPOSITIVO. Clave de idempotencia.
+        client_uuid: { type: string, format: uuid }
         client_code: { type: string }
         taken_at: { type: string, format: date-time }
         notes: { type: string }
@@ -516,33 +788,35 @@ components:
       required: [item_code, quantity, unit_price, price_list]
       properties:
         item_code: { type: string }
-        quantity:
-          type: number
-          format: double
-          minimum: 0
+        quantity: { type: number, format: double, minimum: 0 }
         unit_price:
           type: number
           format: double
           minimum: 0
-          description: >
-            Precio unitario aplicado. CERO ES VÁLIDO (muestra / promoción).
-        price_list:
-          $ref: '#/components/schemas/PriceListNumber'
-          # OBLIGATORIO desde v0.3.0: qué lista eligió el vendedor PARA ESTA LÍNEA.
-          # El middleware valida que esté entre las autorizadas del cliente.
+          description: CERO ES VÁLIDO (muestra / promoción).
+        price_list: { $ref: '#/components/schemas/PriceListNumber' }
         line_discount_pct:
           type: number
           format: double
           minimum: 0
           maximum: 100
-          description: Descuento de línea (%). 100 ES VÁLIDO.
+          description: 100 ES VÁLIDO.
 
     OrderAccepted:
       type: object
       properties:
         client_uuid: { type: string, format: uuid }
         order_number: { type: string }
-        status: { $ref: '#/components/schemas/OrderStatus' }
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+          # ★ v0.4.0 — APROBADA o RETENIDA_CARTERA
+        hold_reason:
+          allOf:
+            - $ref: '#/components/schemas/HoldReason'
+          nullable: true
+          description: >
+            ★ Presente solo si status = RETENIDA_CARTERA.
+            Explica POR QUÉ, para mostrárselo al vendedor.
         received_at: { type: string, format: date-time }
 
     OrderSummary:
@@ -556,10 +830,12 @@ components:
         taken_at: { type: string, format: date-time }
         received_at: { type: string, format: date-time }
         line_count: { type: integer }
-        total_amount:
-          type: number
-          format: double
+        total_amount: { type: number, format: double }
         status: { $ref: '#/components/schemas/OrderStatus' }
+        hold_reason:
+          allOf:
+            - $ref: '#/components/schemas/HoldReason'
+          nullable: true
         notes: { type: string }
 
     OrderDetail:
@@ -570,6 +846,20 @@ components:
             lines:
               type: array
               items: { $ref: '#/components/schemas/OrderDetailLine' }
+            # ── ★ v0.4.0: rastro de la decisión ──
+            decided_by:
+              type: string
+              nullable: true
+              description: Usuario admin que aprobó o rechazó.
+            decided_at:
+              type: string
+              format: date-time
+              nullable: true
+            decision_note:
+              type: string
+              nullable: true
+              description: >
+                Nota del aprobador, o MOTIVO del rechazo (obligatorio al rechazar).
 
     OrderDetailLine:
       type: object
@@ -578,15 +868,37 @@ components:
         item_name: { type: string }
         quantity: { type: number, format: double }
         unit_price: { type: number, format: double }
-        price_list:
-          $ref: '#/components/schemas/PriceListNumber'
+        price_list: { $ref: '#/components/schemas/PriceListNumber' }
         line_discount_pct: { type: number, format: double }
         line_total:
           type: number
           format: double
+          description: Puede ser 0 (promoción) — es VÁLIDO.
+
+    # ═══════════════ ORDEN RETENIDA CON CONTEXTO (★ v0.4.0) ═══════════════
+    HeldOrder:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
           description: >
-            Total tras descuento, calculado por el middleware.
-            Puede ser 0 (muestra o promoción) — es VÁLIDO, no un error.
+            Orden retenida, ENRIQUECIDA con el contexto de cartera del cliente,
+            para que el admin pueda decidir sin salir de la bandeja.
+          properties:
+            client_credit:
+              $ref: '#/components/schemas/ClientCredit'
+            credit_after_order:
+              type: number
+              format: double
+              description: >
+                credit_available − total_amount.
+                Cuánto cupo quedaría si se aprueba. Negativo = lo excede.
+            overdue_amount_from_sage:
+              type: number
+              format: double
+              description: >
+                Cuánto de la mora viene de la migración de Sage.
+                Contexto útil: una deuda de arrastre puede negociarse distinto
+                que una mora reciente.
 
     AdminCatalogItem:
       type: object
@@ -601,12 +913,7 @@ components:
         has_price_1: { type: boolean }
         has_price_2: { type: boolean }
         has_price_3: { type: boolean }
-        no_price_any_list:
-          type: boolean
-          description: >
-            true si el ítem está a 0 en las 3 listas. El Dashboard debe
-            RESALTARLO: puede ser una muestra legítima, o un producto al que
-            se le olvidó configurar el precio.
+        no_price_any_list: { type: boolean }
         stock: { type: number, format: double }
         committed: { type: number, format: double }
         available: { type: number, format: double }
@@ -623,20 +930,17 @@ components:
         manager_name: { type: string }
         shipping_route: { type: string }
         salesperson_code: { type: string }
-        default_price_list:
-          $ref: '#/components/schemas/PriceListNumber'
-          # Viene de SAP (OCRD.ListNum). NO se puede cambiar desde el Dashboard.
+        default_price_list: { $ref: '#/components/schemas/PriceListNumber' }
         additional_price_list:
           type: integer
           enum: [1, 2, 3]
           nullable: true
-          description: >
-            Lista adicional autorizada por el admin. null = ninguna.
-            Vive en el MIDDLEWARE, no en SAP.
         authorized_price_lists:
           type: array
           items: { $ref: '#/components/schemas/PriceListNumber' }
-          description: default_price_list + additional_price_list (si existe).
+        credit:
+          $ref: '#/components/schemas/ClientCredit'
+          # ★ v0.4.0 — el admin ve la cartera en la grilla.
 
     Error:
       type: object

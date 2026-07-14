@@ -25,6 +25,12 @@
 	<key>MIDDLEWARE_BASE_URL</key>
 	<string>$(MIDDLEWARE_BASE_URL)</string>
 
+	<!-- El middleware vive en la LAN del almacén (IP privada). iOS exige permiso de
+	     "red local" para conectarse a rangos RFC1918; sin esta descripción el sistema
+	     bloquea la conexión y el login/sync fallan por "error de conexión". -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>La app se conecta al servidor de Dinas en la red local para iniciar sesión y sincronizar el catálogo, los clientes y las órdenes.</string>
+
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSceneManifest</key>

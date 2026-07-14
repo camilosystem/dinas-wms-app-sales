@@ -166,7 +166,9 @@ final class SyncEngine: ObservableObject {
                 let lines = try repo.lines(orderUUID: order.clientUUID)
                 let accepted = try await api.postOrder(order, lines: lines)
                 try repo.markSynced(orderUUID: order.clientUUID,
-                                    orderNumber: accepted.orderNumber)
+                                    orderNumber: accepted.orderNumber,
+                                    creditVerdict: accepted.status.flatMap(CreditVerdict.init(rawValue:)),
+                                    holdReason: accepted.holdReason.flatMap(HoldReason.init(rawValue:)))
                 AppLog.sync.info("orden \(order.clientUUID, privacy: .public) sincronizada")
             } catch APIError.unauthorized {
                 throw APIError.unauthorized   // token expirado → detener y re-login
@@ -188,7 +190,9 @@ final class SyncEngine: ObservableObject {
         do {
             let lines = try repo.lines(orderUUID: order.clientUUID)
             let accepted = try await api.postOrder(order, lines: lines)
-            try repo.markSynced(orderUUID: order.clientUUID, orderNumber: accepted.orderNumber)
+            try repo.markSynced(orderUUID: order.clientUUID, orderNumber: accepted.orderNumber,
+                                creditVerdict: accepted.status.flatMap(CreditVerdict.init(rawValue:)),
+                                holdReason: accepted.holdReason.flatMap(HoldReason.init(rawValue:)))
             AppLog.sync.info("orden \(order.clientUUID, privacy: .public) enviada (individual)")
             return true
         } catch let error as APIError where error.isPermanent {
@@ -211,7 +215,7 @@ final class SyncEngine: ObservableObject {
     /// y lo reconcilie. Se llama al hacer login online (el vendedor pudo cambiar).
     func resetWatermarks() {
         try? database.dbQueue.write { db in
-            try SyncState.deleteAll(db)
+            _ = try SyncState.deleteAll(db)
         }
         AppLog.sync.info("marcas de sync reseteadas (próxima bajada será completa)")
     }

@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Detalle de un cliente asignado.
 struct ClientDetailView: View {
+    @EnvironmentObject private var environment: AppEnvironment
     let client: Client
 
     var body: some View {
@@ -20,6 +21,22 @@ struct ClientDetailView: View {
             Section("Cliente") {
                 row("Código", client.clientCode)
                 row("Nombre", client.name)
+            }
+
+            Section("Cartera") {
+                CreditSummaryRows(credit: client.credit)
+                NavigationLink {
+                    StatementView(
+                        clientCode: client.clientCode,
+                        clientName: client.name,
+                        api: environment.api,
+                        database: environment.database,
+                        isOnline: { environment.network.isOnline },
+                        onUnauthorized: { environment.auth.sessionExpired() }
+                    )
+                } label: {
+                    Label("Ver estado de cuenta", systemImage: "doc.text.magnifyingglass")
+                }
             }
 
             Section("Ubicación") {

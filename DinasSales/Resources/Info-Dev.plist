@@ -41,6 +41,12 @@
 		<true/>
 	</dict>
 
+	<!-- Permiso de "red local" (iOS Local Network Privacy). Distinto de ATS: iOS gatea
+	     las conexiones a IPs privadas (RFC 1918) y sin esta descripción el sistema las
+	     bloquea → login/sync fallan con "servidor inalcanzable". -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>La app se conecta al servidor de Dinas en la red local para iniciar sesión y sincronizar el catálogo, los clientes y las órdenes.</string>
+
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIApplicationSceneManifest</key>

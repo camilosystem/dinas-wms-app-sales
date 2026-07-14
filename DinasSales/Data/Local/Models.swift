@@ -77,6 +77,9 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
     /// Flag LOCAL (el servidor no lo envía): `false` = dado de baja en SAP pero conservado
     /// porque tiene órdenes locales. No se puede usar para pedidos nuevos.
     var active: Bool = true
+    /// Situación de cartera (★ v0.4.0). GRDB la persiste como JSON en la columna `credit`.
+    /// La app la usa para ADVERTIR offline; el middleware decide con datos frescos.
+    var credit: ClientCredit = .zero
 
     var id: String { clientCode }
 
@@ -90,6 +93,71 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
         case defaultPriceList = "default_price_list"
         case authorizedPriceLists = "authorized_price_lists"
         case active
+        case credit
+    }
+}
+
+// MARK: - ClientCredit (cartera, ★ v0.4.0)
+
+/// Situación de cartera del cliente (schema `ClientCredit`). Datos de la ÚLTIMA
+/// sincronización: la app ADVIERTE con ellos, pero el middleware re-evalúa al recibir
+/// la orden. `has_overdue` viene CALCULADO del servidor — la app NO recalcula el umbral
+/// de días de gracia; solo muestra y usa lo que llega.
+struct ClientCredit: Codable, Equatable {
+    var balance: Double          // saldo actual (de SAP). ES LA CIFRA OFICIAL.
+    var creditLimit: Double      // cupo de crédito
+    var creditAvailable: Double  // credit_limit − balance. Puede ser NEGATIVO.
+    var overdueCount: Int        // facturas vencidas (más allá de la gracia)
+    var overdueAmount: Double    // monto total vencido
+    var maxDaysOverdue: Int      // días de atraso de la factura más vencida
+    /// Conveniencia del servidor: true si la mora supera los días de gracia.
+    /// La app NO recalcula este umbral; lo usa tal cual.
+    var hasOverdue: Bool
+    var graceDays: Int           // días de gracia vigentes (informativo)
+
+    enum CodingKeys: String, CodingKey {
+        case balance
+        case creditLimit = "credit_limit"
+        case creditAvailable = "credit_available"
+        case overdueCount = "overdue_count"
+        case overdueAmount = "overdue_amount"
+        case maxDaysOverdue = "max_days_overdue"
+        case hasOverdue = "has_overdue"
+        case graceDays = "grace_days"
+    }
+
+    /// Estado de cartera para el indicador visual. `excedeCupo` tiene prioridad sobre
+    /// `enMora` solo para el color; el texto puede combinar ambos.
+    enum Status { case alDia, enMora, excedeCupo }
+
+    var status: Status {
+        if creditAvailable < 0 { return .excedeCupo }
+        if hasOverdue { return .enMora }
+        return .alDia
+    }
+
+    /// Crédito en cero (cliente al día, sin cupo). Default para construir `Client` por
+    /// miembros; los datos reales siempre lo sobrescriben al sincronizar.
+    static let zero = ClientCredit(
+        balance: 0, creditLimit: 0, creditAvailable: 0, overdueCount: 0,
+        overdueAmount: 0, maxDaysOverdue: 0, hasOverdue: false, graceDays: 0
+    )
+}
+
+// Campos opcionales del contrato: los no-requeridos (`overdue_*`, `has_overdue`,
+// `grace_days`) se decodifican con default 0/false para tolerar respuestas mínimas.
+// Va en extensión para conservar el init por miembros (usado en tests y al construir).
+extension ClientCredit {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        balance = try c.decode(Double.self, forKey: .balance)
+        creditLimit = try c.decode(Double.self, forKey: .creditLimit)
+        creditAvailable = try c.decode(Double.self, forKey: .creditAvailable)
+        overdueCount = try c.decodeIfPresent(Int.self, forKey: .overdueCount) ?? 0
+        overdueAmount = try c.decodeIfPresent(Double.self, forKey: .overdueAmount) ?? 0
+        maxDaysOverdue = try c.decodeIfPresent(Int.self, forKey: .maxDaysOverdue) ?? 0
+        hasOverdue = try c.decodeIfPresent(Bool.self, forKey: .hasOverdue) ?? false
+        graceDays = try c.decodeIfPresent(Int.self, forKey: .graceDays) ?? 0
     }
 }
 
@@ -110,6 +178,7 @@ extension Client {
         defaultPriceList = try c.decode(Int.self, forKey: .defaultPriceList)
         authorizedPriceLists = try c.decode([Int].self, forKey: .authorizedPriceLists)
         active = try c.decodeIfPresent(Bool.self, forKey: .active) ?? true
+        credit = try c.decode(ClientCredit.self, forKey: .credit)
     }
 }
 
@@ -125,6 +194,34 @@ enum OrderStatus: String, Codable {
     case rejected       // rechazada por error permanente (no se reintenta)
 }
 
+/// Veredicto de CARTERA que emite el middleware al recibir la orden (schema
+/// `OrderStatus` del contrato v0.4.0). Es ORTOGONAL al ciclo local de envío
+/// (`OrderStatus`): una orden `.synced` localmente puede estar APROBADA o RETENIDA.
+/// `nil` hasta que la orden se envía. La app solo lo MUESTRA; no lo evalúa.
+enum CreditVerdict: String, Codable {
+    case sincronizada = "SINCRONIZADA"       // transitorio; el server la mueve enseguida
+    case retenidaCartera = "RETENIDA_CARTERA" // excede cupo o mora; espera al admin
+    case aprobada = "APROBADA"                // cartera OK o el admin la liberó
+    case rechazada = "RECHAZADA"              // el admin la rechazó
+}
+
+/// Por qué se retuvo la orden (schema `HoldReason`). Presente solo si el veredicto
+/// es `retenidaCartera`.
+enum HoldReason: String, Codable {
+    case cupoExcedido = "CUPO_EXCEDIDO"
+    case mora = "MORA"
+    case cupoYMora = "CUPO_Y_MORA"
+
+    /// Texto para el vendedor.
+    var label: String {
+        switch self {
+        case .cupoExcedido: return "Excede el cupo de crédito"
+        case .mora: return "Tiene facturas vencidas"
+        case .cupoYMora: return "Excede el cupo y tiene facturas vencidas"
+        }
+    }
+}
+
 /// Orden tomada por el vendedor. Modelo LOCAL; se transforma a `OrderCreate` al subir.
 ///
 /// Nace con un `clientUUID` (UUID v4) generado en el dispositivo; ese UUID es la clave
@@ -138,7 +235,11 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
     var takenAt: Date?          // momento en que se confirmó offline (taken_at del contrato)
     var syncedAt: Date?         // cuándo el middleware la aceptó
     var orderNumber: String?    // número interno devuelto por el middleware
-    var rejectionReason: String? // motivo del rechazo (si status = .rejected)
+    var rejectionReason: String? // motivo del error permanente (si status = .rejected)
+    /// Veredicto de cartera del middleware (★ v0.4.0). `nil` hasta enviarse.
+    var creditVerdict: CreditVerdict?
+    /// Motivo de la retención (si `creditVerdict == .retenidaCartera`).
+    var holdReason: HoldReason?
 
     var id: String { clientUUID }
 
@@ -153,6 +254,8 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
         case syncedAt = "synced_at"
         case orderNumber = "order_number"
         case rejectionReason = "rejection_reason"
+        case creditVerdict = "credit_verdict"
+        case holdReason = "hold_reason"
     }
 }
 
@@ -183,6 +286,94 @@ struct OrderLine: Codable, FetchableRecord, MutablePersistableRecord, Identifiab
     // Deja que SQLite asigne el rowid autoincremental.
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
+    }
+}
+
+// MARK: - Estado de cuenta (★ v0.4.0)
+
+/// Tipo de documento del estado de cuenta.
+enum StatementDocType: String, Codable {
+    case invoice = "INVOICE"                     // el cliente debe (open_amount > 0)
+    case creditNote = "CREDIT_NOTE"              // resta deuda (open_amount < 0)
+    case paymentOnAccount = "PAYMENT_ON_ACCOUNT" // resta deuda (open_amount < 0)
+}
+
+/// Documento del estado de cuenta (schema `StatementDocument`). Se persiste en GRDB para
+/// consulta OFFLINE. `id`, `clientCode` y `asOf` son LOCALES (no vienen por-documento en
+/// el JSON): se rellenan al guardar. El resto viene del contrato.
+struct StatementDocument: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, Equatable {
+    var id: Int64?              // autoincrement local
+    var clientCode: String     // a qué cliente pertenece (local)
+    var asOf: Date?            // foto de cartera del statement (local)
+    var docType: StatementDocType
+    var docNum: String
+    var docDate: Date?
+    var dueDate: Date?          // NULL para NC y pagos (no vencen)
+    var docTotal: Double
+    /// POSITIVO para facturas (deuda); NEGATIVO para NC y pagos (restan deuda).
+    var openAmount: Double
+    var daysOverdue: Int?       // negativo = aún no vence; NULL para NC y pagos
+    var isFromSage: Bool
+    var sageDocNumber: String?
+
+    static let databaseTableName = "statement_documents"
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case clientCode = "client_code"
+        case asOf = "as_of"
+        case docType = "doc_type"
+        case docNum = "doc_num"
+        case docDate = "doc_date"
+        case dueDate = "due_date"
+        case docTotal = "doc_total"
+        case openAmount = "open_amount"
+        case daysOverdue = "days_overdue"
+        case isFromSage = "is_from_sage"
+        case sageDocNumber = "sage_doc_number"
+    }
+
+    /// ¿Está vencida? Solo aplica a facturas (las NC/pagos no vencen).
+    var isOverdue: Bool { (daysOverdue ?? 0) > 0 }
+
+    mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }
+}
+
+// `id`, `client_code` y `as_of` no vienen por-documento en el JSON del servidor: se
+// decodifican con default y se rellenan al persistir. Igual patrón que Client.active.
+extension StatementDocument {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(Int64.self, forKey: .id)
+        clientCode = try c.decodeIfPresent(String.self, forKey: .clientCode) ?? ""
+        asOf = try c.decodeIfPresent(Date.self, forKey: .asOf)
+        docType = try c.decode(StatementDocType.self, forKey: .docType)
+        docNum = try c.decode(String.self, forKey: .docNum)
+        docDate = try c.decodeIfPresent(Date.self, forKey: .docDate)
+        dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate)
+        docTotal = try c.decode(Double.self, forKey: .docTotal)
+        openAmount = try c.decode(Double.self, forKey: .openAmount)
+        daysOverdue = try c.decodeIfPresent(Int.self, forKey: .daysOverdue)
+        isFromSage = try c.decodeIfPresent(Bool.self, forKey: .isFromSage) ?? false
+        sageDocNumber = try c.decodeIfPresent(String.self, forKey: .sageDocNumber)
+    }
+}
+
+/// Estado de cuenta completo (schema `ClientStatement`). DTO de red: la app persiste
+/// `documents` (como `StatementDocument`) y `credit` (en el cliente). `as_of` acompaña.
+struct ClientStatement: Codable, Equatable {
+    var clientCode: String
+    var clientName: String?
+    var credit: ClientCredit?
+    var documents: [StatementDocument]
+    var asOf: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case clientCode = "client_code"
+        case clientName = "client_name"
+        case credit
+        case documents
+        case asOf = "as_of"
     }
 }
 

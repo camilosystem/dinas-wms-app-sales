@@ -43,7 +43,7 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
         postedUUIDs.append(order.clientUUID)
         postedTakenAt[order.clientUUID] = order.takenAt
         return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: "N-\(postedUUIDs.count)",
-                                status: "SINCRONIZADA", receivedAt: nil)
+                                status: "SINCRONIZADA", holdReason: nil, receivedAt: nil)
     }
 }
 
@@ -75,7 +75,7 @@ private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI, @unchecked Sen
             throw URLError(.networkConnectionLost)   // respuesta perdida tras procesar
         }
         return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: number,
-                                status: "SINCRONIZADA", receivedAt: nil)
+                                status: "SINCRONIZADA", holdReason: nil, receivedAt: nil)
     }
 }
 
@@ -101,7 +101,7 @@ private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI {
         enteredCont?.resume(); enteredCont = nil
         await withCheckedContinuation { releaseCont = $0 }   // se bloquea hasta release()
         return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: "N-\(postCount)",
-                                status: "SINCRONIZADA", receivedAt: nil)
+                                status: "SINCRONIZADA", holdReason: nil, receivedAt: nil)
     }
 
     /// Espera a que `postOrder` haya sido invocado (la 1ª sync está dentro y con flag).

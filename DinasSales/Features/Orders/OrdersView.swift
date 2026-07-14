@@ -258,10 +258,17 @@ private struct OrderRow: View {
                     Text(reason)
                         .font(.caption2).foregroundStyle(.red).lineLimit(2)
                 }
+                // Retenida por cartera: el vendedor debe saber que espera aprobación.
+                if summary.order.creditVerdict == .retenidaCartera {
+                    Text("Esperando aprobación de cartera"
+                         + (summary.order.holdReason.map { " · \($0.label)" } ?? ""))
+                        .font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
-                OrderStatusBadge(status: summary.order.status)
+                OrderStatusBadge(status: summary.order.status,
+                                 creditVerdict: summary.order.creditVerdict)
                 if summary.isOverdue {
                     Text("Vencido")
                         .font(.caption2.weight(.bold))

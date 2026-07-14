@@ -24,6 +24,8 @@ final class OrderCartViewModel: ObservableObject {
     /// Listas que el vendedor puede usar con este cliente (1 o 2).
     let authorizedPriceLists: [Int]
     let defaultPriceList: Int
+    /// Cartera del cliente (última sync), para ADVERTIR si la orden quedará retenida.
+    let credit: ClientCredit
 
     @Published private(set) var rows: [CartRow] = []
     @Published private(set) var total: Double = 0
@@ -36,13 +38,21 @@ final class OrderCartViewModel: ObservableObject {
 
     init(order: Order, clientName: String,
          authorizedPriceLists: [Int], defaultPriceList: Int,
+         credit: ClientCredit = .zero,
          orders: OrdersRepository, catalog: CatalogRepository) {
         self.order = order
         self.clientName = clientName
         self.authorizedPriceLists = authorizedPriceLists.isEmpty ? [defaultPriceList] : authorizedPriceLists
         self.defaultPriceList = defaultPriceList
+        self.credit = credit
         self.orders = orders
         self.catalog = catalog
+    }
+
+    /// Advertencia de retención según los datos locales, o `nil` si la orden no se
+    /// retendría. INFORMATIVA: nunca impide confirmar (la app advierte, el server decide).
+    var holdWarning: HoldWarning? {
+        HoldWarning.evaluate(credit: credit, orderTotal: total)
     }
 
     /// Recarga las líneas desde la base y recalcula el total.

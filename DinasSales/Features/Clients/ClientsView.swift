@@ -43,6 +43,10 @@ struct ClientsView: View {
                     HStack(spacing: 6) {
                         Text(client.name).font(.body.weight(.medium))
                         if !client.active { InactiveClientBadge() }
+                        // Solo se resalta lo que requiere atención (mora / excede cupo).
+                        if client.credit.status != .alDia {
+                            CreditStatusBadge(status: client.credit.status)
+                        }
                     }
                     HStack(spacing: 6) {
                         Text(client.clientCode)

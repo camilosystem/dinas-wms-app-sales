@@ -11,6 +11,8 @@ struct OrderCartView: View {
 
     @State private var showItemPicker = false
     @State private var showDiscardConfirm = false
+    /// Advertencia de retención pendiente de mostrar (nil = nada que advertir).
+    @State private var pendingHoldWarning: HoldWarning?
 
     init(order: Order, clientName: String, database: AppDatabase, onFinish: @escaping () -> Void) {
         // Listas de precio del cliente (para elegir por línea, solo entre las autorizadas).
@@ -22,6 +24,7 @@ struct OrderCartView: View {
             clientName: clientName,
             authorizedPriceLists: authorized,
             defaultPriceList: defaultList,
+            credit: client?.credit ?? .zero,
             orders: OrdersRepository(database: database),
             catalog: CatalogRepository(database: database)
         ))
@@ -92,7 +95,13 @@ struct OrderCartView: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Confirmar") {
-                    if viewModel.confirm() { onFinish() }
+                    // La app ADVIERTE si la orden quedará retenida, pero NO bloquea:
+                    // si hay aviso, se muestra y el vendedor decide; si no, confirma directo.
+                    if let warning = viewModel.holdWarning {
+                        pendingHoldWarning = warning
+                    } else {
+                        confirmOrder()
+                    }
                 }
                 .disabled(viewModel.rows.isEmpty)
             }
@@ -109,7 +118,27 @@ struct OrderCartView: View {
                 onAdd: { viewModel.addOne($0) }
             )
         }
+        // Advertencia de retención por cartera. Es un AVISO, no un bloqueo: el vendedor
+        // puede tomar la orden igual (quizá ya habló con la oficina, o el cliente paga hoy).
+        .confirmationDialog(
+            "Aviso de cartera",
+            isPresented: Binding(get: { pendingHoldWarning != nil },
+                                 set: { if !$0 { pendingHoldWarning = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingHoldWarning
+        ) { _ in
+            Button("Confirmar de todos modos") { confirmOrder() }
+            Button("Revisar la orden", role: .cancel) { pendingHoldWarning = nil }
+        } message: { warning in
+            Text(warning.message)
+        }
         .task { viewModel.reload() }
+    }
+
+    /// Confirma y cierra el flujo. Se llama directo o tras aceptar la advertencia.
+    private func confirmOrder() {
+        pendingHoldWarning = nil
+        if viewModel.confirm() { onFinish() }
     }
 }
 

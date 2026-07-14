@@ -10,11 +10,15 @@ enum JSONCoding {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { d in
             let raw = try d.singleValueContainer().decode(String.self)
-            if let date = iso8601WithFraction.date(from: raw) ?? iso8601Plain.date(from: raw) {
+            // date-time (con/sin fracción) y, como fallback, `format: date` (solo fecha,
+            // p. ej. doc_date/due_date del estado de cuenta v0.4.0).
+            if let date = iso8601WithFraction.date(from: raw)
+                ?? iso8601Plain.date(from: raw)
+                ?? dateOnly.date(from: raw) {
                 return date
             }
             throw DecodingError.dataCorrupted(
-                .init(codingPath: d.codingPath, debugDescription: "Fecha ISO-8601 inválida: \(raw)")
+                .init(codingPath: d.codingPath, debugDescription: "Fecha inválida: \(raw)")
             )
         }
         return decoder
@@ -49,4 +53,19 @@ enum JSONCoding {
 
     private static let iso8601WithFraction = ISO8601([.withInternetDateTime, .withFractionalSeconds])
     private static let iso8601Plain = ISO8601([.withInternetDateTime])
+
+    /// `format: date` del contrato (solo fecha, sin hora). Locale POSIX y UTC fijos para
+    /// un parseo estable. Devuelve medianoche UTC; se usa para mostrar y ordenar.
+    private struct DateOnly: @unchecked Sendable {
+        private let formatter: DateFormatter
+        init() {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = TimeZone(identifier: "UTC")
+            f.dateFormat = "yyyy-MM-dd"
+            formatter = f
+        }
+        func date(from string: String) -> Date? { formatter.date(from: string) }
+    }
+    private static let dateOnly = DateOnly()
 }
