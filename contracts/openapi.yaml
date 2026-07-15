@@ -1,9 +1,60 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.4.0
+  version: 0.4.1
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.4.1 — LA APP SE ENTERA DE LA DECISIÓN DEL ADMIN
+    ══════════════════════════════════════════════════════════════════════════
+
+    Hasta v0.4.0, POST /orders devolvía el estado de la orden UNA SOLA VEZ, al
+    momento de recibirla. Si quedaba RETENIDA_CARTERA, la app nunca volvía a
+    preguntar -- el vendedor no se enteraba cuando el admin la aprobaba o
+    rechazaba despues.
+
+    GET /sync/orders (nuevo, sync-down) cierra ese ciclo: el vendedor descarga
+    el estado ACTUAL de sus propias órdenes (status, hold_reason,
+    decision_note, decided_at), incremental por `since` igual que
+    /sync/catalog y /sync/clients. Deliberadamente liviano: no repite lo que
+    la app ya tiene (client_name, lines, total_amount...), solo lo que puede
+    cambiar DESPUÉS de que la orden ya fue aceptada.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.4.1 — SEGUIMIENTO DEL ESTADO DE LA ORDEN
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ EL PROBLEMA QUE RESUELVE
+
+      Hasta v0.4.0, POST /orders era una FOTO ÚNICA: la app guardaba el estado
+      que devolvía y nunca lo volvía a consultar. Cuando el admin aprobaba o
+      rechazaba una orden retenida, EL VENDEDOR NUNCA SE ENTERABA — su orden
+      se quedaba en "Retenida" para siempre.
+
+      Eso rompía el propósito del módulo de cartera: el vendedor debe poder
+      decirle a su cliente "tu pedido no procedió porque tienes facturas
+      vencidas".
+
+    ★ LA SOLUCIÓN
+
+      1) GET /sync/orders?since=...  (NUEVO)
+         La app descarga el estado ACTUAL de sus órdenes ya enviadas.
+         Incremental. Filtrado por el vendedor del token.
+         Devuelve OrderStatusUpdate (liviano: NO repite líneas, cliente ni
+         totales — la app ya los tiene localmente).
+
+      2) decided_by / decided_at / decision_note EN OrderSummary
+         (antes solo estaban en OrderDetail)
+         Así la GRILLA del Dashboard puede mostrar el motivo del rechazo sin
+         tener que abrir el detalle de cada orden.
+         Se heredan en OrderDetail y HeldOrder vía allOf.
+
+    ★ BASE PARA EL FUTURO
+
+      GET /sync/orders es el cimiento del seguimiento del ciclo de vida de la
+      orden. Cuando lleguen picking, facturación y entrega, el vendedor va a
+      querer saber en qué va su pedido — y este es el canal.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.4.0 — CARTERA Y RETENCIÓN DE ÓRDENES
@@ -146,6 +197,41 @@ paths:
                   clients:
                     type: array
                     items: { $ref: '#/components/schemas/Client' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /sync/orders:
+    get:
+      tags: [sync-down]
+      summary: Estado ACTUAL de las órdenes del vendedor (delta)
+      description: >
+        ★ NUEVO en v0.4.1.
+
+        POST /orders devuelve el estado de la orden UNA SOLA VEZ, al momento
+        de recibirla. Si el admin la aprueba o rechaza DESPUÉS, la app nunca
+        se enteraba -- este endpoint cierra ese ciclo.
+
+        Solo las órdenes del vendedor del token (mismo filtro que
+        /sync/clients). Incremental por `since`, igual que /sync/catalog y
+        /sync/clients: trae tanto órdenes nuevas como las que cambiaron de
+        estado desde la última sincronización.
+
+        Deliberadamente liviano -- no repite lo que la app ya tiene de cuando
+        envió la orden (client_name, lines, total_amount...), solo lo que
+        puede cambiar DESPUÉS: status, hold_reason, decision_note, decided_at.
+      parameters:
+        - $ref: '#/components/parameters/Since'
+      responses:
+        '200':
+          description: Órdenes del vendedor (delta)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server_time: { type: string, format: date-time }
+                  orders:
+                    type: array
+                    items: { $ref: '#/components/schemas/OrderStatusUpdate' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /clients/{client_code}/statement:
@@ -819,6 +905,31 @@ components:
             Explica POR QUÉ, para mostrárselo al vendedor.
         received_at: { type: string, format: date-time }
 
+    # ═══════════════ ESTADO DE LA ORDEN, SYNC-DOWN (★ v0.4.1) ═══════════════
+    OrderStatusUpdate:
+      type: object
+      description: >
+        GET /sync/orders. Deliberadamente liviano: solo lo que puede cambiar
+        DESPUÉS de que la app ya recibió la orden vía POST /orders -- no repite
+        client_name/lines/total_amount/notes (eso la app ya lo tiene).
+      properties:
+        client_uuid: { type: string, format: uuid }
+        order_number: { type: string }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        hold_reason:
+          allOf:
+            - $ref: '#/components/schemas/HoldReason'
+          nullable: true
+        decision_note:
+          type: string
+          nullable: true
+          description: Nota del aprobador, o MOTIVO del rechazo.
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+        received_at: { type: string, format: date-time }
+
     OrderSummary:
       type: object
       properties:
@@ -838,6 +949,27 @@ components:
           nullable: true
         notes: { type: string }
 
+        # ── ★ v0.4.1: rastro de la decisión del admin ──
+        # Están en OrderSummary (no solo en OrderDetail) para que la GRILLA
+        # pueda mostrar el motivo del rechazo sin abrir el detalle.
+        # Se heredan en OrderDetail y HeldOrder vía allOf.
+        decided_by:
+          type: string
+          nullable: true
+          description: Usuario admin que aprobó o rechazó. NULL si aún no hay decisión.
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Cuándo se tomó la decisión. NULL si aún no hay decisión.
+        decision_note:
+          type: string
+          nullable: true
+          description: >
+            Nota del aprobador, o MOTIVO del rechazo (obligatorio al rechazar).
+            ★ El VENDEDOR lo verá: es lo que le permite explicarle al cliente
+            por qué su pedido no procedió.
+
     OrderDetail:
       allOf:
         - $ref: '#/components/schemas/OrderSummary'
@@ -846,20 +978,7 @@ components:
             lines:
               type: array
               items: { $ref: '#/components/schemas/OrderDetailLine' }
-            # ── ★ v0.4.0: rastro de la decisión ──
-            decided_by:
-              type: string
-              nullable: true
-              description: Usuario admin que aprobó o rechazó.
-            decided_at:
-              type: string
-              format: date-time
-              nullable: true
-            decision_note:
-              type: string
-              nullable: true
-              description: >
-                Nota del aprobador, o MOTIVO del rechazo (obligatorio al rechazar).
+            # decided_by / decided_at / decision_note se heredan de OrderSummary.
 
     OrderDetailLine:
       type: object

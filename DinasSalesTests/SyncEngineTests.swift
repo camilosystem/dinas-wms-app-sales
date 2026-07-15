@@ -375,6 +375,29 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertNil(o?.holdReason)
     }
 
+    /// ★ Caso REAL que fallaba: la orden local tiene el UUID en MAYÚSCULAS
+    /// (`UUID().uuidString` de Swift) pero `/sync/orders` lo devuelve en minúsculas
+    /// (`Guid.ToString()` de .NET). El match por UUID NO debe depender del case.
+    func test_pullOrderStatuses_uuidServidorEnMinusculas_igualEncuentraYActualiza() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let localUUID = "74BB849B-652B-40D5-9D9B-288F1AC50721"   // como lo guarda la app
+        try seedHeldSyncedOrder(db, uuid: localUUID)             // RETENIDA, .synced
+
+        // El servidor devuelve EXACTAMENTE el mismo UUID, pero en minúsculas.
+        let serverUUID = localUUID.lowercased()
+        XCTAssertNotEqual(serverUUID, localUUID, "el caso reproduce la diferencia de case")
+        let api = StubSyncAPI()
+        api.orderStatuses = [statusUpdate(serverUUID, status: "APROBADA", note: "OK")]
+        let engine = SyncEngine(database: db, api: api)
+
+        try await engine.pullOrderStatuses()
+
+        let o = try await db.dbQueue.read { try Order.fetchOne($0, key: localUUID) }
+        XCTAssertEqual(o?.creditVerdict, .aprobada,
+                       "el case del UUID no debe impedir aplicar la decisión")
+        XCTAssertEqual(o?.decisionNote, "OK")
+    }
+
     func test_pullOrderStatuses_ignoraOrdenNoEnviada() async throws {
         let db = try AppDatabase.makeInMemory()
         let repo = OrdersRepository(database: db, now: { Date(timeIntervalSince1970: 0) },

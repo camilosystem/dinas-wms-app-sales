@@ -106,7 +106,13 @@ struct OrdersRepository {
     /// rechazadas por error permanente (esas nunca entraron al ciclo del servidor).
     @discardableResult
     static func applyStatusUpdate(_ update: OrderStatusUpdate, in db: Database) throws -> Bool {
-        guard var order = try Order.fetchOne(db, key: update.clientUUID),
+        // Match del UUID SIN distinguir mayúsculas: la app genera el `client_uuid` con
+        // `UUID().uuidString` (MAYÚSCULAS) y el middleware .NET lo devuelve con
+        // `Guid.ToString()` (minúsculas). La PK de SQLite es case-sensitive (BINARY), así
+        // que un `fetchOne(key:)` directo no casaría y la decisión del admin se perdía.
+        guard var order = try Order
+                .filter(Column("client_uuid").collating(.nocase) == update.clientUUID)
+                .fetchOne(db),
               order.status == .synced else { return false }
         if let verdict = update.status.flatMap(CreditVerdict.init(rawValue:)) {
             order.creditVerdict = verdict
