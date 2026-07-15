@@ -51,8 +51,9 @@ final class AppEnvironment: ObservableObject {
 
         self.pendingOrders = PendingOrdersObserver(database: database)
 
-        // El monitor de red es SOLO informativo (banner offline). La sincronización es
-        // siempre manual, disparada por el vendedor — no hay auto-sync al reconectar.
-        self.network = NetworkMonitor()
+        // Conectividad re-evaluada activamente: el monitor SONDEA al middleware (no solo
+        // mira la interfaz de red) y se recupera solo o con el botón "Reintentar". NO
+        // dispara sync — sigue siendo manual, disparado por el vendedor.
+        self.network = NetworkMonitor(probe: { await api.checkReachability() })
     }
 }

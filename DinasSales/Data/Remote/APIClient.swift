@@ -94,6 +94,25 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI {
         return try await send(request, decode: OrderAcceptedDTO.self)
     }
 
+    // MARK: - Alcanzabilidad
+
+    /// Sondeo ligero: ¿responde el middleware? Cualquier respuesta HTTP (incluido 401/404)
+    /// cuenta como ALCANZABLE; solo un error de TRANSPORTE (conexión rehusada, timeout, sin
+    /// ruta) significa inalcanzable. No requiere token ni tiene efectos secundarios.
+    func checkReachability() async -> Bool {
+        guard let baseURL else { return false }
+        var request = URLRequest(url: baseURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            _ = try await session.data(for: request)
+            return true          // hubo respuesta HTTP → el middleware está arriba
+        } catch {
+            return false         // error de transporte → inalcanzable
+        }
+    }
+
     // MARK: - Cartera (★ v0.4.0)
 
     /// `GET /clients/{code}/statement`. Estado de cuenta del cliente.

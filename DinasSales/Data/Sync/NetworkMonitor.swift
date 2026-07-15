@@ -2,34 +2,114 @@ import Foundation
 import Network
 import os
 
-/// Observa la conectividad, **solo para informar** (banner "sin conexión").
+/// Estado de conectividad **con el middleware**, re-evaluado activamente.
 ///
-/// Decisión de producto: la sincronización es SIEMPRE manual, disparada por el vendedor.
-/// El monitor NO dispara sync al reconectar — el vendedor necesita control y certeza de
-/// qué se sincronizó y cuándo. Aquí no hay ningún efecto secundario más allá de publicar
-/// `isOnline`.
+/// Antes se alimentaba SOLO del `pathUpdateHandler` de `NWPathMonitor`, que reporta si el
+/// dispositivo tiene una interfaz de red satisfecha — NO si el middleware responde. Eso
+/// dejaba dos huecos: (1) middleware caído con WiFi arriba se veía "online"; (2) si el
+/// monitor no entregaba el flanco de recuperación (típico en el simulador), `isOnline`
+/// quedaba pegado en `false` hasta reiniciar la app.
+///
+/// Ahora la conectividad es un estado ACTIVO: se **sondea** el middleware (cualquier
+/// respuesta HTTP = alcanzable; error de transporte = no) en tres disparadores:
+///   1. flanco `.satisfied` de `NWPathMonitor` (cambió la red del dispositivo),
+///   2. sondeo de respaldo mientras está offline (por si el middleware vuelve sin que
+///      cambie la red del dispositivo),
+///   3. `retry()` manual (botón "Reintentar conexión").
+///
+/// Decisión de producto intacta: NO dispara sincronización — el sync es siempre manual.
+/// Solo publica `isOnline` (y `isChecking` para el spinner del botón).
 @MainActor
 final class NetworkMonitor: ObservableObject {
     @Published private(set) var isOnline = true
+    /// `true` mientras corre un sondeo (para el spinner del botón Reintentar).
+    @Published private(set) var isChecking = false
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.dinas.sales.network")
+    /// Sondeo de alcance al middleware. Devuelve `true` si respondió (alcanzable).
+    private let probe: @Sendable () async -> Bool
+    /// Solo en producción: reintento automático (NWPath + poll). En tests se dirige a mano.
+    private let autoRetry: Bool
+    /// Cada cuánto reintentar mientras está offline (respaldo del NWPath).
+    private let pollInterval: Duration
+    private var pollTask: Task<Void, Never>?
 
-    /// `autoStart: false` en tests, para dirigir el estado con `handle(online:)`.
-    init(autoStart: Bool = true) {
+    /// `autoStart: false` en tests, para dirigir el estado con `handle(online:)`/`check()`.
+    /// `probe` por defecto asume alcanzable (tests que no ejercitan el sondeo).
+    init(autoStart: Bool = true,
+         pollInterval: Duration = .seconds(10),
+         probe: @escaping @Sendable () async -> Bool = { true }) {
+        self.probe = probe
+        self.autoRetry = autoStart
+        self.pollInterval = pollInterval
         guard autoStart else { return }
         monitor.pathUpdateHandler = { [weak self] path in
-            let online = path.status == .satisfied
-            Task { @MainActor in self?.handle(online: online) }
+            let satisfied = path.status == .satisfied
+            Task { @MainActor in self?.pathChanged(satisfied: satisfied) }
         }
         monitor.start(queue: queue)
     }
 
-    /// Actualiza el estado de conectividad. Solo publica `isOnline`; sin más efectos.
-    /// Interno para poder simular transiciones en tests.
+    // MARK: - Disparadores
+
+    /// Cambió la ruta de red del dispositivo. Sin interfaz → offline directo; con interfaz
+    /// NO asumimos alcance al middleware: sondeamos.
+    private func pathChanged(satisfied: Bool) {
+        if satisfied {
+            Task { await self.check() }
+        } else {
+            setOnline(false)   // sin ninguna interfaz: definitivamente offline
+        }
+    }
+
+    /// "Reintentar conexión" (botón). Fuerza un sondeo ahora mismo.
+    func retry() async {
+        await check()
+    }
+
+    /// Sondea el middleware y actualiza `isOnline` según el alcance REAL. Único punto de
+    /// re-evaluación (lo llaman el NWPath, el poll y el botón).
+    func check() async {
+        guard !isChecking else { return }
+        isChecking = true
+        let reachable = await probe()
+        isChecking = false
+        setOnline(reachable)
+    }
+
+    // MARK: - Estado
+
+    private func setOnline(_ online: Bool) {
+        if isOnline != online {
+            isOnline = online
+            AppLog.network.info("conectividad \(online ? "online" : "offline", privacy: .public)")
+        }
+        // Respaldo: mientras esté offline, reintenta solo; al volver, deja de sondear.
+        if online { stopPolling() } else { startPolling() }
+    }
+
+    /// Sondeo de respaldo mientras está offline (solo producción). Cubre el caso en que el
+    /// middleware vuelve sin que la red del dispositivo cambie (NWPath no se dispara).
+    private func startPolling() {
+        guard autoRetry, pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: self?.pollInterval ?? .seconds(10))
+                guard let self, !Task.isCancelled, !self.isOnline else { break }
+                await self.check()
+            }
+        }
+    }
+
+    private func stopPolling() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+
+    /// Semilla de estado para tests (simula el flanco de `NWPathMonitor` sin sondeo).
     func handle(online: Bool) {
-        isOnline = online
-        AppLog.network.debug("red \(online ? "online" : "offline", privacy: .public)")
+        setOnline(online)
     }
 
     deinit {
