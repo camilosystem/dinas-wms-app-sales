@@ -71,18 +71,25 @@ final class DeliveryTests: XCTestCase {
         XCTAssertEqual(saved?.deliveryReason, detalle, "el detalle del rechazo se muestra tal cual")
     }
 
-    func test_sinEntregaRegistrada_noMuestraSeccionNiRompe() async throws {
+    func test_sinEntregaRegistrada_null_noMuestraSeccionNiRompe() async throws {
         let db = try AppDatabase.makeInMemory()
         let repo = try await seedSyncedOrder(db)
-        // NULL: la mayoría de las órdenes (aún no entregadas).
+        // NULL = el pedido aún no salió: la mayoría de las órdenes. No se muestra sección.
         try repo.applyStatusUpdate(deliveryUpdate("ORD-1", nil))
         XCTAssertNil(try repo.order(uuid: "ORD-1")?.deliveryStatus,
                      "sin entrega registrada → nil, no se muestra sección")
-        // PENDIENTE (despachado, en ruta) tampoco es un resultado que mostrar.
+    }
+
+    func test_pendiente_seMuestraComoEnRuta() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let repo = try await seedSyncedOrder(db)
+        // PENDIENTE = el camión salió, va en ruta. Se muestra (distinto de NULL).
         try repo.applyStatusUpdate(deliveryUpdate("ORD-1", "PENDIENTE"))
-        let pend = try repo.order(uuid: "ORD-1")
-        XCTAssertEqual(pend?.deliveryStatus, .pendiente)
-        XCTAssertFalse(pend?.deliveryStatus?.isResult ?? true, "PENDIENTE no muestra sección de entrega")
+        let saved = try repo.order(uuid: "ORD-1")
+        XCTAssertEqual(saved?.deliveryStatus, .pendiente)
+        XCTAssertTrue(saved?.deliveryStatus?.isResult ?? false, "PENDIENTE se muestra")
+        XCTAssertEqual(saved?.deliveryStatus?.label, "En ruta")
+        XCTAssertNil(saved?.deliveryReason, "en ruta: aún sin motivo (no ha llegado)")
     }
 
     // MARK: - Sync: decodifica y persiste los campos nuevos

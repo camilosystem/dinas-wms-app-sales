@@ -255,16 +255,11 @@ enum DeliveryStatus: String, Codable {
     case entregadoParcial = "ENTREGADO_PARCIAL"  // recibió, pero rechazó ítems
     case noEntregado = "NO_ENTREGADO"            // no recibió nada
 
-    /// ¿Se le muestra al vendedor una sección/indicador de entrega?
-    ///
-    /// ★ HUECO DE DISEÑO (a resolver en el MIDDLEWARE): hoy `/sync/orders` manda `null` para
-    /// todo lo no entregado —incluso pedidos de un camión ALISTADO— y NUNCA emite `PENDIENTE`.
-    /// Es decir, el canal no distingue "aún no despachado" (null) de "ya va en ruta". Por eso,
-    /// POR AHORA, `.pendiente` se trata igual que `nil` (no se muestra nada). Cuando el
-    /// middleware distinga el despacho y empiece a emitir `PENDIENTE`, basta incluir
-    /// `.pendiente` aquí para mostrar "En ruta" (la label/color/icon ya están listos) — así el
-    /// vendedor podrá decirle a su cliente "va en camino hoy".
-    var isResult: Bool { self != .pendiente }
+    /// ¿Se le muestra al vendedor una sección/indicador de entrega? Todos los estados que
+    /// emite el middleware se muestran: `.pendiente` → "En ruta" (★ activado: el middleware ya
+    /// emite PENDIENTE, distingue "en ruta" de "aún no despachado"), y los terminales su
+    /// resultado. Solo `nil` (sin registrar) no pinta nada, y eso se filtra antes (optional).
+    var isResult: Bool { true }
 }
 
 /// Orden tomada por el vendedor. Modelo LOCAL; se transforma a `OrderCreate` al subir.
