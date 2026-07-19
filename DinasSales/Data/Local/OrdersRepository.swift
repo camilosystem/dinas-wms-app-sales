@@ -121,6 +121,11 @@ struct OrdersRepository {
         order.holdReason = update.holdReason.flatMap(HoldReason.init(rawValue:))
         order.decisionNote = update.decisionNote
         order.decidedAt = update.decidedAt
+        // ★ v0.11.0 — resultado de la entrega. `deliveryReason` se guarda tal cual (texto ya
+        // formateado por el middleware); nunca se parsea ni se traducen enums.
+        order.deliveryStatus = update.deliveryStatus.flatMap(DeliveryStatus.init(rawValue:))
+        order.deliveryReason = update.deliveryReason
+        order.deliveredAt = update.deliveredAt
         if let number = update.orderNumber { order.orderNumber = number }
         try order.update(db)
         return true

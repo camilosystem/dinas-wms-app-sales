@@ -269,6 +269,11 @@ private struct OrderRow: View {
                     Text(summary.order.decisionNote ?? "Rechazada por la oficina")
                         .font(.caption2).foregroundStyle(.red).lineLimit(2)
                 }
+                // ★ v0.11.0 — Resultado de la entrega de un vistazo (solo estados terminales).
+                if let delivery = summary.order.deliveryStatus, delivery.isResult {
+                    Label(delivery.label, systemImage: delivery.icon)
+                        .font(.caption2).foregroundStyle(delivery.color).lineLimit(1)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {

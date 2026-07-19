@@ -58,6 +58,27 @@ struct Item: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatabl
     }
 }
 
+// `active` NO está en el `required` del contrato: si el middleware lo omitiera, la
+// decodificación sintetizada (que lo exige) tumbaría el catálogo ENTERO. Se decodifica con
+// `decodeIfPresent` (default true: ausente → activo). Va en extensión para conservar el
+// init por miembros (usado al construir Item en tests). Mismo patrón que Client/ClientCredit.
+extension Item {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        itemCode = try c.decode(String.self, forKey: .itemCode)
+        name = try c.decode(String.self, forKey: .name)
+        category = try c.decodeIfPresent(String.self, forKey: .category)
+        barcode = try c.decodeIfPresent(String.self, forKey: .barcode)
+        priceList1 = try c.decode(Double.self, forKey: .priceList1)
+        priceList2 = try c.decode(Double.self, forKey: .priceList2)
+        priceList3 = try c.decode(Double.self, forKey: .priceList3)
+        stock = try c.decodeIfPresent(Double.self, forKey: .stock)
+        available = try c.decode(Double.self, forKey: .available)
+        imageURL = try c.decodeIfPresent(String.self, forKey: .imageURL)
+        active = try c.decodeIfPresent(Bool.self, forKey: .active) ?? true
+    }
+}
+
 // MARK: - Client
 
 /// Cliente asignado al vendedor (schema `Client`).
@@ -222,6 +243,20 @@ enum HoldReason: String, Codable {
     }
 }
 
+/// Resultado de la ENTREGA de un pedido (schema `DeliveryStatus`, ★ v0.11.0). Lo registra
+/// el admin en el Dashboard y baja vía GET /sync/orders. `nil` (nunca despachado) y
+/// `.pendiente` (despachado, en ruta) son ambos "sin resultado todavía": la UI no muestra
+/// sección de entrega hasta que hay un estado terminal. La app solo lo MUESTRA.
+enum DeliveryStatus: String, Codable {
+    case pendiente = "PENDIENTE"                 // el camión salió, no ha vuelto
+    case entregado = "ENTREGADO"                 // el cliente recibió todo
+    case entregadoParcial = "ENTREGADO_PARCIAL"  // recibió, pero rechazó ítems
+    case noEntregado = "NO_ENTREGADO"            // no recibió nada
+
+    /// ¿Hay un resultado terminal que mostrarle al vendedor? `.pendiente` aún no.
+    var isResult: Bool { self != .pendiente }
+}
+
 /// Orden tomada por el vendedor. Modelo LOCAL; se transforma a `OrderCreate` al subir.
 ///
 /// Nace con un `clientUUID` (UUID v4) generado en el dispositivo; ese UUID es la clave
@@ -247,6 +282,13 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
     var decisionNote: String?
     /// Cuándo el admin decidió (★ v0.4.1).
     var decidedAt: Date?
+    /// Resultado de la ENTREGA (★ v0.11.0). `nil` mientras no se registre.
+    var deliveryStatus: DeliveryStatus?
+    /// Por qué no se entregó (o se entregó parcial), YA formateado por el middleware. Se
+    /// muestra tal cual. `nil` si no aplica (entregado completo, o sin registrar).
+    var deliveryReason: String?
+    /// Cuándo se registró la entrega (★ v0.11.0).
+    var deliveredAt: Date?
 
     var id: String { clientUUID }
 
@@ -265,6 +307,9 @@ struct Order: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatab
         case holdReason = "hold_reason"
         case decisionNote = "decision_note"
         case decidedAt = "decided_at"
+        case deliveryStatus = "delivery_status"
+        case deliveryReason = "delivery_reason"
+        case deliveredAt = "delivered_at"
     }
 }
 

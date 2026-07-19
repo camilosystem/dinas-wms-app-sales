@@ -339,7 +339,8 @@ final class SyncEngineTests: XCTestCase {
                               holdReason: String? = nil) -> OrderStatusUpdate {
         OrderStatusUpdate(clientUUID: uuid, orderNumber: "N-1", status: status,
                           holdReason: holdReason, decisionNote: note,
-                          decidedAt: Date(timeIntervalSince1970: 100), receivedAt: nil)
+                          decidedAt: Date(timeIntervalSince1970: 100), receivedAt: nil,
+                          deliveryStatus: nil, deliveryReason: nil, deliveredAt: nil)
     }
 
     func test_pullOrderStatuses_retenida_aprobada_seVeAprobada() async throws {

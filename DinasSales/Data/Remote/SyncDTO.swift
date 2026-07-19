@@ -62,6 +62,12 @@ struct OrderStatusUpdate: Decodable {
     let decisionNote: String?
     let decidedAt: Date?
     let receivedAt: Date?
+    // ★ v0.11.0 — resultado de la ENTREGA (para que el vendedor sepa qué pasó). Todos
+    // nullable: la mayoría de las órdenes aún no se han entregado. `deliveryReason` viene
+    // YA formateado por el middleware — se muestra tal cual (no se parsea ni traduce).
+    let deliveryStatus: String?
+    let deliveryReason: String?
+    let deliveredAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case clientUUID = "client_uuid"
@@ -71,6 +77,9 @@ struct OrderStatusUpdate: Decodable {
         case decisionNote = "decision_note"
         case decidedAt = "decided_at"
         case receivedAt = "received_at"
+        case deliveryStatus = "delivery_status"
+        case deliveryReason = "delivery_reason"
+        case deliveredAt = "delivered_at"
     }
 }
 

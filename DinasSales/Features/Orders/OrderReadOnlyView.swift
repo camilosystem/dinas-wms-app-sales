@@ -65,6 +65,23 @@ struct OrderReadOnlyView: View {
                 }
             }
 
+            // ★ v0.11.0 — Resultado de la ENTREGA. Solo cuando hay estado terminal
+            // (entregado/parcial/no entregado); `nil` y `.pendiente` no muestran nada.
+            if let delivery = viewModel.order.deliveryStatus, delivery.isResult {
+                Section("Entrega") {
+                    Label(delivery.label, systemImage: delivery.icon)
+                        .foregroundStyle(delivery.color)
+                    // Motivo YA formateado por el middleware: se muestra tal cual.
+                    if let reason = viewModel.order.deliveryReason, !reason.isEmpty {
+                        Text(reason)
+                    }
+                    if let at = viewModel.order.deliveredAt {
+                        Text("Registrada el \(at.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("Ítems") {
                 ForEach(viewModel.rows) { row in
                     HStack {
@@ -100,6 +117,37 @@ struct OrderReadOnlyView: View {
         if let at = viewModel.order.decidedAt {
             Text("Decidida el \(at.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Presentación del resultado de entrega (mismo estilo visual que el veredicto de cartera:
+/// color + label; el motivo lo trae el servidor ya redactado).
+extension DeliveryStatus {
+    var label: String {
+        switch self {
+        case .pendiente: return "Pendiente de entrega"
+        case .entregado: return "Entregado"
+        case .entregadoParcial: return "Entrega parcial"
+        case .noEntregado: return "No entregado"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .pendiente: return .secondary
+        case .entregado: return .green
+        case .entregadoParcial: return .orange
+        case .noEntregado: return .red
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .pendiente: return "clock"
+        case .entregado: return "checkmark.circle.fill"
+        case .entregadoParcial: return "exclamationmark.triangle.fill"
+        case .noEntregado: return "xmark.circle.fill"
         }
     }
 }

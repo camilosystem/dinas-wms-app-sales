@@ -236,6 +236,16 @@ struct AppDatabase {
             }
         }
 
+        // ★ v0.11.0 — resultado de la ENTREGA: baja vía GET /sync/orders y se guarda en la
+        // orden local. Aditiva, nullable (la mayoría de las órdenes aún no se entregaron).
+        migrator.registerMigration("v7_entrega") { db in
+            try db.alter(table: "orders") { t in
+                t.add(column: "delivery_status", .text)     // DeliveryStatus (crudo del server)
+                t.add(column: "delivery_reason", .text)     // texto YA formateado por el middleware
+                t.add(column: "delivered_at", .datetime)    // cuándo se registró la entrega
+            }
+        }
+
         return migrator
     }
 }
