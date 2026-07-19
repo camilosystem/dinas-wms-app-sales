@@ -126,7 +126,7 @@ struct OrderReadOnlyView: View {
 extension DeliveryStatus {
     var label: String {
         switch self {
-        case .pendiente: return "Pendiente de entrega"
+        case .pendiente: return "En ruta"   // listo para cuando el middleware emita PENDIENTE
         case .entregado: return "Entregado"
         case .entregadoParcial: return "Entrega parcial"
         case .noEntregado: return "No entregado"
@@ -135,7 +135,7 @@ extension DeliveryStatus {
 
     var color: Color {
         switch self {
-        case .pendiente: return .secondary
+        case .pendiente: return .blue
         case .entregado: return .green
         case .entregadoParcial: return .orange
         case .noEntregado: return .red

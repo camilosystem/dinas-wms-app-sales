@@ -244,16 +244,26 @@ enum HoldReason: String, Codable {
 }
 
 /// Resultado de la ENTREGA de un pedido (schema `DeliveryStatus`, ★ v0.11.0). Lo registra
-/// el admin en el Dashboard y baja vía GET /sync/orders. `nil` (nunca despachado) y
-/// `.pendiente` (despachado, en ruta) son ambos "sin resultado todavía": la UI no muestra
-/// sección de entrega hasta que hay un estado terminal. La app solo lo MUESTRA.
+/// el admin en el Dashboard y baja vía GET /sync/orders. Conceptualmente `nil` y `.pendiente`
+/// son DISTINTOS (nil = aún no salió el camión; PENDIENTE = ya va en ruta), pero ver más
+/// abajo. La app solo lo MUESTRA. Decodificación tolerante: llega como `String?` en el DTO
+/// (SyncDTO) y se mapea con `init(rawValue:)`, así un valor desconocido → nil (no revienta
+/// el sync); el enum nunca se decodifica directo de la red.
 enum DeliveryStatus: String, Codable {
-    case pendiente = "PENDIENTE"                 // el camión salió, no ha vuelto
+    case pendiente = "PENDIENTE"                 // el camión salió, va en ruta
     case entregado = "ENTREGADO"                 // el cliente recibió todo
     case entregadoParcial = "ENTREGADO_PARCIAL"  // recibió, pero rechazó ítems
     case noEntregado = "NO_ENTREGADO"            // no recibió nada
 
-    /// ¿Hay un resultado terminal que mostrarle al vendedor? `.pendiente` aún no.
+    /// ¿Se le muestra al vendedor una sección/indicador de entrega?
+    ///
+    /// ★ HUECO DE DISEÑO (a resolver en el MIDDLEWARE): hoy `/sync/orders` manda `null` para
+    /// todo lo no entregado —incluso pedidos de un camión ALISTADO— y NUNCA emite `PENDIENTE`.
+    /// Es decir, el canal no distingue "aún no despachado" (null) de "ya va en ruta". Por eso,
+    /// POR AHORA, `.pendiente` se trata igual que `nil` (no se muestra nada). Cuando el
+    /// middleware distinga el despacho y empiece a emitir `PENDIENTE`, basta incluir
+    /// `.pendiente` aquí para mostrar "En ruta" (la label/color/icon ya están listos) — así el
+    /// vendedor podrá decirle a su cliente "va en camino hoy".
     var isResult: Bool { self != .pendiente }
 }
 

@@ -107,4 +107,19 @@ final class DeliveryTests: XCTestCase {
         XCTAssertEqual(saved?.deliveryReason, "El cliente rechazó: 2 de Castipan (llegó dañado).")
         XCTAssertNotNil(saved?.deliveredAt, "delivered_at persistido")
     }
+
+    func test_sync_valorDesconocidoDeDeliveryStatus_noRompeElSync() async throws {
+        let db = try AppDatabase.makeInMemory()
+        let repo = try await seedSyncedOrder(db)
+        // Un delivery_status que la app aún no conoce (p. ej. un estado futuro del contrato).
+        let json = Data("""
+        {"server_time":"2026-07-18T10:00:00Z",
+         "orders":[{"client_uuid":"ORD-1","delivery_status":"FUTURO_DESCONOCIDO"}]}
+        """.utf8)
+        // No lanza al decodificar (delivery_status llega como String en el DTO).
+        let page = try JSONCoding.decoder.decode(OrdersSyncResponse.self, from: json)
+        for update in page.orders { try repo.applyStatusUpdate(update) }
+        XCTAssertNil(try repo.order(uuid: "ORD-1")?.deliveryStatus,
+                     "valor desconocido → nil (no revienta el sync ni pinta sección)")
+    }
 }
