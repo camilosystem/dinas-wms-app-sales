@@ -16,20 +16,25 @@ final class AppEnvironment: ObservableObject {
     let pendingOrders: PendingOrdersObserver
     let network: NetworkMonitor
 
+    /// Usuario cuyo archivo de base está abierto ahora (para detectar el cambio de usuario).
+    private var currentDBUser: String?
+
     init() {
-        // Base local en el contenedor de la app. Si falla la apertura, es un error
-        // no recuperable: la app offline-first no puede operar sin su base.
+        // La sesión (con el JWT) vive en el Keychain. El cliente HTTP toma el token de ahí.
+        let sessionStore = KeychainSessionStore()
+
+        // ★ Aislamiento por usuario: se abre el archivo del usuario YA guardado (si reabrimos la
+        // app con sesión). Dos vendedores en el mismo dispositivo NUNCA ven datos del otro.
+        let initialUser = (try? sessionStore.read())?.username
         let database: AppDatabase
         do {
-            database = try AppDatabase.makeShared()
+            database = try AppDatabase.makeForUser(initialUser)
         } catch {
             fatalError("No se pudo abrir la base local: \(error)")
         }
         self.database = database
+        self.currentDBUser = initialUser
 
-        // La sesión (con el JWT) vive en el Keychain. El cliente HTTP toma el token de
-        // ahí para el Authorization: Bearer, y la sesión gobierna el acceso a la app.
-        let sessionStore = KeychainSessionStore()
         let api = APIClient(
             baseURL: AppConfig.middlewareBaseURL,
             tokenProvider: { try? sessionStore.read()?.token }
@@ -44,16 +49,27 @@ final class AppEnvironment: ObservableObject {
                               onUnauthorized: { auth.sessionExpired() })
         self.sync = sync
 
-        // Login ONLINE → resetea las marcas de sync para que la próxima bajada sea
-        // completa y reconcilie (baja el set actual del vendedor; quita lo que ya no
-        // le corresponde, salvo lo referenciado por sus órdenes locales).
-        auth.onOnlineLogin = { [weak sync] in sync?.resetWatermarks() }
+        let pendingOrders = PendingOrdersObserver(database: database)
+        self.pendingOrders = pendingOrders
 
-        self.pendingOrders = PendingOrdersObserver(database: database)
-
-        // Conectividad re-evaluada activamente: el monitor SONDEA al middleware (no solo
-        // mira la interfaz de red) y se recupera solo o con el botón "Reintentar". NO
-        // dispara sync — sigue siendo manual, disparado por el vendedor.
+        // Conectividad re-evaluada activamente: el monitor SONDEA al middleware (no solo mira la
+        // interfaz de red) y se recupera solo o con el botón "Reintentar". NO dispara sync.
         self.network = NetworkMonitor(probe: { await api.checkReachability() })
+
+        // Login ONLINE → (1) si entró OTRO usuario, apunta la base a SU archivo y reinicia el
+        // observador (aislamiento estructural; el login offline solo reactiva al mismo usuario);
+        // (2) resetea las marcas de sync para que la próxima bajada sea completa y reconcilie.
+        // Va al final: capturar `self` exige que todas las props estén inicializadas.
+        auth.onOnlineLogin = { [weak self, weak sync, weak pendingOrders] in
+            if let self {
+                let user = (try? sessionStore.read())?.username
+                if user != self.currentDBUser {
+                    self.currentDBUser = user
+                    try? self.database.reopen(forUser: user)
+                    pendingOrders?.restart()
+                }
+            }
+            sync?.resetWatermarks()
+        }
     }
 }

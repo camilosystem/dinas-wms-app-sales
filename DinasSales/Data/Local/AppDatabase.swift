@@ -5,9 +5,13 @@ import GRDB
 ///
 /// Encapsula el `DatabaseQueue` y define las migraciones del esquema.
 /// Toda lectura/escritura de la app pasa por aquí.
-struct AppDatabase {
-    /// Cola de acceso a la base. GRDB serializa los accesos.
-    let dbQueue: DatabaseQueue
+/// ★ Es una CLASE (referencia): la base pertenece al usuario actual y su cola se puede REABRIR
+/// al cambiar de usuario. Como todos los consumidores comparten la misma referencia, ven el
+/// archivo del usuario nuevo sin re-inyectar nada. Confinada al @MainActor (todo el acceso a BD
+/// es en MainActor: SyncEngine/observers/repos).
+final class AppDatabase {
+    /// Cola de acceso a la base. GRDB serializa los accesos. `var` para poder REABRIRLA.
+    private(set) var dbQueue: DatabaseQueue
 
     init(_ dbQueue: DatabaseQueue) throws {
         self.dbQueue = dbQueue
@@ -16,18 +20,32 @@ struct AppDatabase {
 
     // MARK: - Fábricas
 
-    /// Base compartida de la app, en Application Support.
-    static func makeShared() throws -> AppDatabase {
-        let fm = FileManager.default
-        let folder = try fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let dbURL = folder.appendingPathComponent("dinas-sales.sqlite")
-        let dbQueue = try DatabaseQueue(path: dbURL.path)
-        return try AppDatabase(dbQueue)
+    /// Base POR USUARIO, en Application Support. ★ Aislamiento estructural: cada vendedor tiene
+    /// su propio archivo → dos vendedores en el mismo dispositivo NUNCA ven pedidos/clientes
+    /// ajenos. No depende de limpiar cache al cambiar de sesión.
+    static func makeForUser(_ username: String?) throws -> AppDatabase {
+        try AppDatabase(try DatabaseQueue(path: fileURL(forUser: username).path))
+    }
+
+    /// Reabre la base apuntando al archivo de OTRO usuario. Migra el nuevo archivo y reemplaza
+    /// la cola; los consumidores que comparten esta referencia ven el archivo del usuario nuevo.
+    func reopen(forUser username: String?) throws {
+        let newQueue = try DatabaseQueue(path: Self.fileURL(forUser: username).path)
+        try migrator.migrate(newQueue)
+        dbQueue = newQueue
+    }
+
+    private static func fileURL(forUser username: String?) throws -> URL {
+        let folder = try FileManager.default.url(for: .applicationSupportDirectory,
+                                                 in: .userDomainMask, appropriateFor: nil, create: true)
+        return folder.appendingPathComponent(filename(forUser: username))
+    }
+
+    /// Nombre de archivo por usuario, saneado (solo `[a-z0-9_-]`). `nil`/vacío → "invitado".
+    static func filename(forUser username: String?) -> String {
+        let raw = (username ?? "").lowercased()
+        let safe = String(raw.map { ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") ? $0 : "_" })
+        return "dinas-sales-\(safe.isEmpty ? "_guest" : safe).sqlite"
     }
 
     /// Base en memoria, para tests.
