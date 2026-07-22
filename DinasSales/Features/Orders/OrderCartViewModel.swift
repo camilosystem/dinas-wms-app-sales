@@ -78,10 +78,15 @@ final class OrderCartViewModel: ObservableObject {
     }
 
     /// Añade un ítem con la lista por defecto del cliente (o suma 1 si ya está en esa lista).
-    func addOne(_ item: Item) {
+    func addOne(_ item: Item) { add(item, quantity: 1) }
+
+    /// Añade `quantity` unidades del ítem con la lista por defecto (suma a lo ya existente en
+    /// esa lista). Ignora cantidades ≤ 0: nunca crea una línea vacía.
+    func add(_ item: Item, quantity: Double) {
+        guard quantity > 0 else { return }
         let current = rows.first { $0.itemCode == item.itemCode && $0.priceList == defaultPriceList }?.quantity ?? 0
         write { try orders.setQuantity(orderUUID: order.clientUUID, itemCode: item.itemCode,
-                                       priceList: defaultPriceList, quantity: current + 1) }
+                                       priceList: defaultPriceList, quantity: current + quantity) }
     }
 
     func setQuantity(_ row: CartRow, quantity: Double) {

@@ -85,14 +85,22 @@ struct OrderCartView: View {
         } message: {
             Text("Se eliminará la orden y sus líneas. Esta acción no se puede deshacer.")
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showItemPicker = true
-                } label: {
-                    Label("Agregar", systemImage: "plus")
-                }
+        // ★ "Agregar ítems" va en el BODY, no en la toolbar: en `.primaryAction` el Label
+        // colapsa a solo-ícono (mismo bug ya validado). Como botón prominente el texto se ve.
+        .safeAreaInset(edge: .bottom) {
+            Button {
+                showItemPicker = true
+            } label: {
+                Label("Agregar ítems", systemImage: "plus")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
             }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal)
+            .padding(.bottom, 6)
+        }
+        .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Confirmar") {
                     // La app ADVIERTE si la orden quedará retenida, pero NO bloquea:
@@ -115,7 +123,7 @@ struct OrderCartView: View {
                 database: environment.database,
                 priceList: viewModel.defaultPriceList,
                 quantities: viewModel.quantitiesByItem,
-                onAdd: { viewModel.addOne($0) }
+                onAdd: { item, qty in viewModel.add(item, quantity: qty) }
             )
         }
         // Advertencia de retención por cartera. Es un AVISO, no un bloqueo: el vendedor

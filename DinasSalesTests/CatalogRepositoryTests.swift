@@ -49,6 +49,20 @@ final class CatalogRepositoryTests: XCTestCase {
         XCTAssertEqual(try repo.items(matching: "AZ-200").map(\.itemCode), ["SKU-100"])
     }
 
+    /// El buscador del catálogo ignora tildes (y mayúsculas), igual que el de clientes.
+    func test_items_busquedaInsensibleAAcentos() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db, [
+            item("SKU-1", name: "Pantalón Clásico", category: "Ropa"),
+            item("SKU-2", name: "Café Molido", category: "Comestibles"),
+        ])
+        let repo = CatalogRepository(database: db)
+
+        XCTAssertEqual(try repo.items(matching: "pantalon").map(\.itemCode), ["SKU-1"])
+        XCTAssertEqual(try repo.items(matching: "cafe").map(\.itemCode), ["SKU-2"])
+        XCTAssertEqual(try repo.items(matching: "CLÁSICO").map(\.itemCode), ["SKU-1"])
+    }
+
     func test_items_escapaComodinesDeLike() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db, [
