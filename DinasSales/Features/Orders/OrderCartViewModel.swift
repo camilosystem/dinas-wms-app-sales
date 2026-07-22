@@ -89,6 +89,18 @@ final class OrderCartViewModel: ObservableObject {
                                        priceList: defaultPriceList, quantity: current + quantity) }
     }
 
+    /// Fija la cantidad ABSOLUTA del ítem en la lista por defecto (para el stepper del picker,
+    /// que edita el carrito directamente). En 0 quita la línea; si no existía y es > 0, la crea.
+    func setQuantity(item: Item, quantity: Double) {
+        let existing = rows.first { $0.itemCode == item.itemCode && $0.priceList == defaultPriceList }
+        if quantity <= 0 {
+            if let existing { write { try orders.removeLine(lineId: existing.lineId) } }
+        } else {
+            write { try orders.setQuantity(orderUUID: order.clientUUID, itemCode: item.itemCode,
+                                           priceList: defaultPriceList, quantity: quantity) }
+        }
+    }
+
     func setQuantity(_ row: CartRow, quantity: Double) {
         if quantity <= 0 {
             write { try orders.removeLine(lineId: row.lineId) }

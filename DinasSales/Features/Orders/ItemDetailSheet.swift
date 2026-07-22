@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Detalle del ítem como HOJA encima del listado de "Agregar ítems" (no reemplaza la pantalla).
-/// Muestra imagen, categoría, disponible y precios de las 3 listas, y permite agregar al carrito
-/// con su propio stepper sin cerrar el modal.
+/// Muestra imagen, categoría, disponible y precios de las 3 listas. El stepper (+/-) edita el
+/// carrito directamente, igual que en la grilla — sin botón de confirmación aparte (el rótulo
+/// "En el carrito: N" refleja el estado en vivo).
 ///
 /// La sección "Promociones" es un ESPACIO RESERVADO (estructura lista) para las promociones
 /// activables que se implementarán después — sin lógica todavía, para que ese contenido entre
@@ -12,10 +13,21 @@ struct ItemDetailSheet: View {
     /// Lista de precio del cliente (se marca como "del cliente" y es con la que se agrega).
     let priceList: Int
     let inCartQuantity: Double
-    let onAdd: (Double) -> Void
+    /// Fija la cantidad absoluta del ítem en el carrito (0 = quitar).
+    let onSetQuantity: (Double) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var quantity: Int = 1
+    /// Cantidad en el carrito (sembrada con lo que ya había); el stepper la edita en vivo.
+    @State private var quantity: Int
+
+    init(item: Item, priceList: Int, inCartQuantity: Double,
+         onSetQuantity: @escaping (Double) -> Void) {
+        self.item = item
+        self.priceList = priceList
+        self.inCartQuantity = inCartQuantity
+        self.onSetQuantity = onSetQuantity
+        _quantity = State(initialValue: Int(inCartQuantity))
+    }
 
     var body: some View {
         NavigationStack {
@@ -38,8 +50,8 @@ struct ItemDetailSheet: View {
                         .foregroundStyle(.secondary)
                     }
 
-                    if inCartQuantity > 0 {
-                        Label("En el carrito: \(Int(inCartQuantity))", systemImage: "cart.fill")
+                    if quantity > 0 {
+                        Label("En el carrito: \(quantity)", systemImage: "cart.fill")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.tint)
                     }
@@ -109,20 +121,24 @@ struct ItemDetailSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// Barra inferior fija: stepper + agregar (sin obligar a cerrar el modal).
+    /// Barra inferior fija: el stepper edita el carrito directamente (sin botón de confirmación,
+    /// igual que la grilla). El rótulo de arriba refleja el total en vivo.
     private var addBar: some View {
-        HStack(spacing: 12) {
-            CompactStepper(value: $quantity, range: 1...9999)
-            Button {
-                onAdd(Double(quantity))
-                dismiss()
-            } label: {
-                Label("Agregar \(quantity)", systemImage: "cart.badge.plus")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-            }
-            .buttonStyle(.borderedProminent)
+        HStack {
+            Text(quantity > 0 ? "En el carrito" : "Agregar al carrito")
+                .font(.headline)
+            Spacer()
+            CompactStepper(
+                value: quantity,
+                onDecrement: {
+                    quantity = max(0, quantity - 1)
+                    onSetQuantity(Double(quantity))
+                },
+                onIncrement: {
+                    quantity += 1
+                    onSetQuantity(Double(quantity))
+                }
+            )
         }
         .padding()
         .background(.ultraThinMaterial)

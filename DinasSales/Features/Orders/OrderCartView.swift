@@ -123,7 +123,7 @@ struct OrderCartView: View {
                 database: environment.database,
                 priceList: viewModel.defaultPriceList,
                 quantities: viewModel.quantitiesByItem,
-                onAdd: { item, qty in viewModel.add(item, quantity: qty) }
+                onSetQuantity: { item, qty in viewModel.setQuantity(item: item, quantity: qty) }
             )
         }
         // Advertencia de retención por cartera. Es un AVISO, no un bloqueo: el vendedor

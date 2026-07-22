@@ -57,4 +57,22 @@ final class OrderCartViewModelTests: XCTestCase {
         XCTAssertEqual(vm.rows.first?.priceList, 2, "agrega con la lista por defecto")
         XCTAssertEqual(vm.rows.first?.unitPrice, 8)
     }
+
+    /// El stepper del picker fija la cantidad ABSOLUTA: crea la línea, la actualiza y en 0 la quita.
+    func test_setQuantityItem_creaActualizaYen0Quita() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db, authorized: [1], defaultList: 1)
+        let vm = makeVM(db, order: try newOrder(db), authorized: [1], defaultList: 1)
+        let item = try CatalogRepository(database: db).item(code: "I1")!
+
+        vm.setQuantity(item: item, quantity: 1)        // crea
+        XCTAssertEqual(vm.rows.first?.quantity, 1)
+
+        vm.setQuantity(item: item, quantity: 3)        // actualiza (absoluto, no suma)
+        XCTAssertEqual(vm.rows.count, 1)
+        XCTAssertEqual(vm.rows.first?.quantity, 3)
+
+        vm.setQuantity(item: item, quantity: 0)        // quita
+        XCTAssertTrue(vm.rows.isEmpty, "en 0 se quita la línea del carrito")
+    }
 }

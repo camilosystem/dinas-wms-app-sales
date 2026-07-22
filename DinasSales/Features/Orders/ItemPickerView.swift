@@ -4,24 +4,22 @@ import SwiftUI
 /// Catálogo: grilla con imagen/código/nombre/disponible/precio y buscador SIEMPRE visible
 /// arriba (TextField explícito, insensible a mayúsculas y acentos, igual que el de clientes).
 ///
-/// Cada celda trae un stepper (+/-) para ajustar la cantidad y agregar SIN abrir el detalle.
-/// Tocar la celda (no el stepper) abre el DETALLE como hoja encima del listado — con su propio
-/// stepper y espacio reservado para promociones (futuro). El mínimo del stepper es 1: nunca se
-/// agrega una línea en 0.
+/// El stepper (+/-) de cada celda EDITA el carrito directamente: `+` incrementa la línea, `-`
+/// decrementa y en 0 la quita — sin botón de confirmación aparte. Tocar la celda (no el stepper)
+/// abre el DETALLE como hoja encima del listado. Confirmación visual: badge "en carrito" en la
+/// celda + toast breve al incrementar.
 struct ItemPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: CatalogViewModel
 
     /// Lista de precio por defecto del cliente (se agrega con esa; el precio mostrado es de ella).
     let priceList: Int
-    /// Cantidades ya en el carrito, por código de ítem (para el badge "en carrito").
-    let quantities: [String: Double]
-    let onAdd: (Item, Double) -> Void
+    /// Cantidad absoluta del ítem en el carrito, por código (para el stepper y el badge).
+    let onSetQuantity: (Item, Double) -> Void
 
-    /// Cantidad elegida en cada celda (mínimo 1).
-    @State private var qtyByItem: [String: Int] = [:]
-    /// Unidades agregadas en esta sesión (feedback inmediato del badge, sin recargar el padre).
-    @State private var addedHere: [String: Double] = [:]
+    /// Cantidad en el carrito por ítem — fuente de verdad local del picker (sembrada con lo que
+    /// ya había en el carrito). Cada +/- la actualiza y la persiste vía `onSetQuantity`.
+    @State private var cartQty: [String: Double]
     @State private var detailItem: Item?
     @State private var toast: String?
     @State private var toastTask: Task<Void, Never>?
@@ -29,13 +27,13 @@ struct ItemPickerView: View {
     private let columns = [GridItem(.adaptive(minimum: 165), spacing: 12)]
 
     init(database: AppDatabase, priceList: Int, quantities: [String: Double],
-         onAdd: @escaping (Item, Double) -> Void) {
+         onSetQuantity: @escaping (Item, Double) -> Void) {
         _viewModel = StateObject(
             wrappedValue: CatalogViewModel(repository: CatalogRepository(database: database))
         )
         self.priceList = priceList
-        self.quantities = quantities
-        self.onAdd = onAdd
+        self.onSetQuantity = onSetQuantity
+        _cartQty = State(initialValue: quantities)
     }
 
     var body: some View {
@@ -67,8 +65,8 @@ struct ItemPickerView: View {
                 ItemDetailSheet(
                     item: item,
                     priceList: priceList,
-                    inCartQuantity: inCart(item),
-                    onAdd: { qty in commitAdd(item, quantity: qty) }
+                    inCartQuantity: qty(item),
+                    onSetQuantity: { newQty in setQty(item, to: newQty) }
                 )
             }
             .overlay(alignment: .bottom) { toastView }
@@ -104,13 +102,10 @@ struct ItemPickerView: View {
                     ItemCell(
                         item: item,
                         priceList: priceList,
-                        inCart: inCart(item),
-                        quantity: Binding(
-                            get: { qtyByItem[item.itemCode] ?? 1 },
-                            set: { qtyByItem[item.itemCode] = $0 }
-                        ),
+                        inCart: qty(item),
                         onOpenDetail: { detailItem = item },
-                        onAdd: { commitAdd(item, quantity: Double(qtyByItem[item.itemCode] ?? 1)) }
+                        onIncrement: { setQty(item, to: qty(item) + 1) },
+                        onDecrement: { setQty(item, to: qty(item) - 1) }
                     )
                 }
             }
@@ -129,17 +124,18 @@ struct ItemPickerView: View {
         }
     }
 
-    /// Unidades del ítem ya en el carrito (las que venían + las agregadas en esta sesión).
-    private func inCart(_ item: Item) -> Double {
-        (quantities[item.itemCode] ?? 0) + (addedHere[item.itemCode] ?? 0)
-    }
+    /// Cantidad del ítem en el carrito (según la fuente de verdad local).
+    private func qty(_ item: Item) -> Double { cartQty[item.itemCode] ?? 0 }
 
-    /// Agrega al carrito, actualiza el badge y muestra la confirmación (toast breve).
-    private func commitAdd(_ item: Item, quantity: Double) {
-        guard quantity > 0 else { return }
-        addedHere[item.itemCode, default: 0] += quantity
-        onAdd(item, quantity)
-        showToast("Agregado ×\(Int(quantity))")
+    /// Fija la cantidad del ítem en el carrito, persiste el cambio y da la confirmación visual:
+    /// toast breve solo al INCREMENTAR (el badge de la celda refleja el total en todo momento).
+    private func setQty(_ item: Item, to newQuantity: Double) {
+        let previous = qty(item)
+        let clamped = max(0, newQuantity)
+        guard clamped != previous else { return }
+        cartQty[item.itemCode] = clamped
+        onSetQuantity(item, clamped)
+        if clamped > previous { showToast("Agregado ×\(Int(clamped))") }
     }
 
     private func showToast(_ message: String) {
@@ -152,15 +148,15 @@ struct ItemPickerView: View {
     }
 }
 
-/// Celda tipo catálogo con stepper: la parte superior (imagen + datos) abre el detalle;
-/// la barra inferior (stepper + agregar) ajusta y agrega sin salir del listado.
+/// Celda tipo catálogo: la parte superior (imagen + datos) abre el detalle; el stepper de abajo
+/// edita el carrito directamente (+/-), sin botón de confirmación aparte.
 private struct ItemCell: View {
     let item: Item
     let priceList: Int
     let inCart: Double
-    @Binding var quantity: Int
     let onOpenDetail: () -> Void
-    let onAdd: () -> Void
+    let onIncrement: () -> Void
+    let onDecrement: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -195,15 +191,8 @@ private struct ItemCell: View {
             }
             .buttonStyle(.plain)
 
-            HStack(spacing: 8) {
-                CompactStepper(value: $quantity, range: 1...9999)
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                        .font(.subheadline.weight(.bold))
-                        .frame(maxWidth: .infinity, minHeight: 30)
-                }
-                .buttonStyle(.borderedProminent)
-            }
+            CompactStepper(value: Int(inCart), fillWidth: true,
+                           onDecrement: onDecrement, onIncrement: onIncrement)
         }
         .padding(8)
         .background(Color.secondary.opacity(0.06))
@@ -211,24 +200,22 @@ private struct ItemCell: View {
     }
 }
 
-/// Stepper compacto `[-] N [+]` para las celdas y el detalle. Cantidad entera; se detiene en
-/// los extremos del rango (mínimo 1 → nunca agrega en 0).
+/// Stepper compacto `[-] N [+]`. Edita una cantidad que vive fuera (cada toque dispara un
+/// callback); se detiene en 0 (deshabilita "-"). `fillWidth` estira el número al ancho disponible.
 struct CompactStepper: View {
-    @Binding var value: Int
-    let range: ClosedRange<Int>
+    let value: Int
+    var fillWidth: Bool = false
+    let onDecrement: () -> Void
+    let onIncrement: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            stepButton("minus", enabled: value > range.lowerBound) {
-                value = max(range.lowerBound, value - 1)
-            }
+            stepButton("minus", enabled: value > 0, onDecrement)
             Text("\(value)")
                 .font(.callout.weight(.semibold))
                 .monospacedDigit()
-                .frame(minWidth: 30)
-            stepButton("plus", enabled: value < range.upperBound) {
-                value = min(range.upperBound, value + 1)
-            }
+                .frame(minWidth: 30, maxWidth: fillWidth ? .infinity : nil)
+            stepButton("plus", enabled: true, onIncrement)
         }
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
     }
