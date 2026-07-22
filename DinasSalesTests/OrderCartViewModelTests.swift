@@ -75,4 +75,20 @@ final class OrderCartViewModelTests: XCTestCase {
         vm.setQuantity(item: item, quantity: 0)        // quita
         XCTAssertTrue(vm.rows.isEmpty, "en 0 se quita la línea del carrito")
     }
+
+    /// La línea del carrito expone el disponible del ítem y marca cuando lo pedido lo excede
+    /// (aviso, no bloqueo). `available` de I1 es 100.
+    func test_cartRow_marcaCuandoExcedeDisponible() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db, authorized: [1], defaultList: 1)
+        let vm = makeVM(db, order: try newOrder(db), authorized: [1], defaultList: 1)
+        let item = try CatalogRepository(database: db).item(code: "I1")!
+
+        vm.setQuantity(item: item, quantity: 50)       // dentro de lo disponible
+        XCTAssertEqual(vm.rows.first?.available, 100)
+        XCTAssertFalse(vm.rows.first!.exceedsAvailable, "50 ≤ 100 → sin aviso")
+
+        vm.setQuantity(item: item, quantity: 150)      // por encima
+        XCTAssertTrue(vm.rows.first!.exceedsAvailable, "150 > 100 → advierte")
+    }
 }

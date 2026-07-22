@@ -44,7 +44,6 @@ struct OrderCartView: View {
                             authorizedPriceLists: viewModel.authorizedPriceLists,
                             canChoosePriceList: viewModel.canChoosePriceList,
                             onQuantity: { viewModel.setQuantity(row, quantity: $0) },
-                            onDiscount: { viewModel.setDiscount(row, percent: $0) },
                             onPriceList: { viewModel.setPriceList(row, priceList: $0) }
                         )
                     }
@@ -156,7 +155,6 @@ private struct CartRowView: View {
     let authorizedPriceLists: [Int]
     let canChoosePriceList: Bool
     let onQuantity: (Double) -> Void
-    let onDiscount: (Double) -> Void
     let onPriceList: (Int) -> Void
 
     var body: some View {
@@ -171,6 +169,9 @@ private struct CartRowView: View {
                 Text(MoneyFormat.string(row.lineTotal)).font(.callout.weight(.semibold))
             }
 
+            // El descuento por línea está OCULTO por ahora (line_discount_pct sigue viajando
+            // en el contrato como 0). Se re-habilitará por ítem cuando exista el módulo de
+            // promociones (el admin fijará un descuento MÁXIMO por ítem desde el Dashboard).
             HStack(spacing: 16) {
                 Stepper(value: Binding(
                     get: { row.quantity },
@@ -179,21 +180,9 @@ private struct CartRowView: View {
                     Text("Cant: \(row.quantity.formatted())")
                         .font(.subheadline)
                 }
-
-                HStack(spacing: 4) {
-                    Text("Desc %").font(.subheadline).foregroundStyle(.secondary)
-                    TextField("0", value: Binding(
-                        get: { row.discountPct },
-                        set: { onDiscount($0) }
-                    ), format: .number)
-                    .frame(width: 48)
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyleRoundedCompat()
-                    #if os(iOS)
-                    .keyboardType(.decimalPad)
-                    #endif
-                }
             }
+
+            availabilityNote
 
             // Selector de lista de precio (solo si el cliente tiene más de una autorizada).
             if canChoosePriceList {
@@ -218,13 +207,19 @@ private struct CartRowView: View {
             }
         }
     }
-}
 
-private extension View {
-    /// `.textFieldStyle(.roundedBorder)` existe en iOS y macOS, pero lo aislamos por
-    /// claridad del compat de plataforma.
-    @ViewBuilder
-    func textFieldStyleRoundedCompat() -> some View {
-        self.textFieldStyle(.roundedBorder)
+    /// Disponibilidad de la línea (foto de la última sincronización). Si lo pedido excede lo
+    /// disponible, se marca en rojo con advertencia — AVISA, no bloquea (el middleware decide).
+    @ViewBuilder private var availabilityNote: some View {
+        if row.exceedsAvailable {
+            Label("Pediste \(row.quantity.formatted()) y hay \(row.available.formatted()) disponibles",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.red)
+        } else {
+            Text("Disponible: \(row.available.formatted()) · según última sincronización")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }

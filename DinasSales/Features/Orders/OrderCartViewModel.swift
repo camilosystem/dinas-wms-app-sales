@@ -9,8 +9,12 @@ struct CartRow: Identifiable, Equatable {
     let unitPrice: Double
     let priceList: Int
     let discountPct: Double
+    /// Disponible del ítem según la ÚLTIMA sincronización (foto, no tiempo real).
+    let available: Double
     var id: Int64 { lineId }
     var lineTotal: Double { quantity * unitPrice * (1 - discountPct / 100) }
+    /// Pidió más de lo que había disponible en la última sincronización → advertir (no bloquea).
+    var exceedsAvailable: Bool { quantity > available }
 }
 
 /// Estado del carrito de UNA orden (borrador) para un cliente.
@@ -60,10 +64,12 @@ final class OrderCartViewModel: ObservableObject {
         do {
             let lines = try orders.lines(orderUUID: order.clientUUID)
             rows = try lines.map { line in
-                let name = try catalog.item(code: line.itemCode)?.name ?? line.itemCode
-                return CartRow(lineId: line.id ?? 0, itemCode: line.itemCode, name: name,
+                let item = try catalog.item(code: line.itemCode)
+                return CartRow(lineId: line.id ?? 0, itemCode: line.itemCode,
+                               name: item?.name ?? line.itemCode,
                                quantity: line.quantity, unitPrice: line.unitPrice,
-                               priceList: line.priceList, discountPct: line.lineDiscountPct)
+                               priceList: line.priceList, discountPct: line.lineDiscountPct,
+                               available: item?.available ?? 0)
             }
             total = rows.reduce(0) { $0 + $1.lineTotal }
             errorMessage = nil
