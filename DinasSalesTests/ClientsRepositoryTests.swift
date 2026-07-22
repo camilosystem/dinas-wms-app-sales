@@ -45,6 +45,24 @@ final class ClientsRepositoryTests: XCTestCase {
         XCTAssertEqual(try repo.clients(matching: "R2").map(\.clientCode), ["CL-200"])
     }
 
+    /// El filtro ignora tildes: teclear sin acento encuentra al cliente acentuado (y viceversa),
+    /// además de ignorar mayúsculas. Clave para nombres de ciudad/cliente en español.
+    func test_clients_busquedaInsensibleAAcentos() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db, [
+            client("CL-100", name: "Almacén González", city: "Bogotá"),
+            client("CL-200", name: "Minimarket Sur", city: "Medellín"),
+        ])
+        let repo = ClientsRepository(database: db)
+
+        // Sin tilde encuentra al acentuado.
+        XCTAssertEqual(Set(try repo.clients(matching: "bogota").map(\.clientCode)), ["CL-100"])
+        XCTAssertEqual(Set(try repo.clients(matching: "medellin").map(\.clientCode)), ["CL-200"])
+        XCTAssertEqual(Set(try repo.clients(matching: "gonzalez").map(\.clientCode)), ["CL-100"])
+        // Con tilde y en mayúscula también.
+        XCTAssertEqual(Set(try repo.clients(matching: "ALMACÉN").map(\.clientCode)), ["CL-100"])
+    }
+
     func test_client_porCodigo() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db, [client("X-1", name: "Uno")])

@@ -40,7 +40,10 @@ struct OrdersView: View {
                     Button {
                         showClientPicker = true
                     } label: {
-                        Label("Nueva orden", systemImage: "plus")
+                        // ★ titleAndIcon: en la toolbar el Label sale solo-ícono por defecto;
+                        // forzamos el texto junto al "+". Es corto → cabe en iPhone SE.
+                        Label("Nueva Orden", systemImage: "plus")
+                            .labelStyle(.titleAndIcon)
                     }
                 }
             }

@@ -9,31 +9,35 @@ struct ClientsRepository {
     let database: AppDatabase
 
     /// Clientes ordenados por nombre. Si `query` no está vacío, filtra por código,
-    /// nombre, ciudad o ruta de reparto (subcadena, sin distinguir mayúsculas).
+    /// nombre, ciudad o ruta de reparto (subcadena, insensible a mayúsculas Y acentos).
     /// `activeOnly` excluye los dados de baja en SAP (para tomar órdenes NUEVAS); la
     /// pestaña Clientes los muestra igual (marcados inactivos) porque conservan órdenes.
+    ///
+    /// El filtro de texto se hace en memoria (no en SQL): la lista es local y de pocos
+    /// cientos de filas, así que es instantáneo, y el `LIKE` de SQLite no ignora tildes
+    /// —"gonzalez" debe encontrar "González". No hace falta debounce.
     func clients(matching query: String, activeOnly: Bool = false) throws -> [Client] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try database.dbQueue.read { db in
+        let needle = Self.fold(query)
+        let all = try database.dbQueue.read { db -> [Client] in
             var request = Client.all()
-
             if activeOnly {
                 request = request.filter(Column("active") == true)
             }
-
-            if !trimmed.isEmpty {
-                let pattern = "%\(escapeLike(trimmed))%"
-                let esc: SQLExpressible = "\\"
-                request = request.filter(
-                    Column("client_code").like(pattern, escape: esc)
-                    || Column("name").like(pattern, escape: esc)
-                    || Column("city").like(pattern, escape: esc)
-                    || Column("shipping_route").like(pattern, escape: esc)
-                )
-            }
-
             return try request.order(Column("name")).fetchAll(db)
         }
+        guard !needle.isEmpty else { return all }
+        return all.filter { client in
+            Self.fold(client.clientCode).contains(needle)
+                || Self.fold(client.name).contains(needle)
+                || Self.fold(client.city ?? "").contains(needle)
+                || Self.fold(client.shippingRoute ?? "").contains(needle)
+        }
+    }
+
+    /// Normaliza para comparar: sin tildes y sin distinguir mayúsculas.
+    private static func fold(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
     }
 
     /// Un cliente por su código.
@@ -41,12 +45,5 @@ struct ClientsRepository {
         try database.dbQueue.read { db in
             try Client.fetchOne(db, key: code)
         }
-    }
-
-    /// Escapa los comodines de LIKE para tratar el texto del usuario como literal.
-    private func escapeLike(_ text: String) -> String {
-        text.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "%", with: "\\%")
-            .replacingOccurrences(of: "_", with: "\\_")
     }
 }
