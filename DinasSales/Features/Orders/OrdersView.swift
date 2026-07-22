@@ -35,17 +35,20 @@ struct OrdersView: View {
                 }
             }
             .navigationTitle("Órdenes")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showClientPicker = true
-                    } label: {
-                        // ★ titleAndIcon: en la toolbar el Label sale solo-ícono por defecto;
-                        // forzamos el texto junto al "+". Es corto → cabe en iPhone SE.
-                        Label("Nueva Orden", systemImage: "plus")
-                            .labelStyle(.titleAndIcon)
-                    }
+            .safeAreaInset(edge: .bottom) {
+                // ★ Botón en el BODY, no en la toolbar: en `.primaryAction` el Label colapsaba a
+                // solo-ícono pese a `.titleAndIcon`. Como botón prominente el texto SIEMPRE se ve.
+                Button {
+                    showClientPicker = true
+                } label: {
+                    Label("Nueva Orden", systemImage: "plus")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                 }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal)
+                .padding(.bottom, 6)
             }
             .navigationDestination(for: OrderRoute.self) { route in
                 destination(for: route)
