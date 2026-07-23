@@ -5,10 +5,6 @@ struct ClientDetailView: View {
     @EnvironmentObject private var environment: AppEnvironment
     let client: Client
 
-    /// Borrador recién iniciado desde el atajo (dispara la navegación al carrito).
-    @State private var newOrder: Order?
-    @State private var showNewOrder = false
-
     var body: some View {
         List {
             if !client.active {
@@ -41,20 +37,6 @@ struct ClientDetailView: View {
                 } label: {
                     Label("Ver estado de cuenta", systemImage: "doc.text.magnifyingglass")
                 }
-
-                // Atajo: crea (o retoma) el borrador de ESTE cliente y va directo al carrito, sin
-                // volver a buscarlo en el picker. Reutiliza el flujo normal (startOrder +
-                // OrderCartView) → el aviso de cartera al confirmar se conserva igual. Los clientes
-                // dados de baja no pueden tomar pedidos nuevos, así que solo se muestra si activo.
-                if client.active {
-                    Button {
-                        newOrder = try? OrdersRepository(database: environment.database)
-                            .startOrder(clientCode: client.clientCode)
-                        showNewOrder = newOrder != nil
-                    } label: {
-                        Label("Nueva Orden", systemImage: "plus")
-                    }
-                }
             }
 
             Section("Ubicación") {
@@ -74,14 +56,6 @@ struct ClientDetailView: View {
         }
         .navigationTitle(client.name)
         .navigationBarTitleDisplayModeInlineCompat()
-        .navigationDestination(isPresented: $showNewOrder) {
-            if let newOrder {
-                OrderCartView(order: newOrder, clientName: client.name,
-                              database: environment.database) {
-                    showNewOrder = false   // al guardar/confirmar/descartar, vuelve al detalle
-                }
-            }
-        }
     }
 
     private func row(_ title: String, _ value: String) -> some View {
