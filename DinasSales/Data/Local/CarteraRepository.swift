@@ -55,8 +55,43 @@ struct CarteraRepository {
             guard var payment = try AccountPayment.fetchOne(db, key: paymentUUID) else { return }
             payment.syncStatus = .synced
             payment.syncedAt = now()
+            payment.failureReason = nil
             if let evidenceImageURL { payment.evidenceImageURL = evidenceImageURL }
             try payment.update(db)
+        }
+    }
+
+    /// Marca un pago como RECHAZADO permanentemente (4xx), con el motivo del servidor.
+    func markPaymentFailed(paymentUUID: String, reason: String) throws {
+        try database.dbQueue.write { db in
+            guard var payment = try AccountPayment.fetchOne(db, key: paymentUUID) else { return }
+            payment.syncStatus = .failed
+            payment.failureReason = reason
+            try payment.update(db)
+        }
+    }
+
+    /// Reintenta un pago fallido: lo devuelve a la cola (`queued`) para el próximo sync.
+    func retryPayment(paymentUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard var payment = try AccountPayment.fetchOne(db, key: paymentUUID) else { return }
+            payment.syncStatus = .queued
+            payment.failureReason = nil
+            try payment.update(db)
+        }
+    }
+
+    /// Descarta un pago (p. ej. uno fallido que el vendedor decide no reintentar).
+    func discardPayment(paymentUUID: String) throws {
+        try database.dbQueue.write { db in _ = try AccountPayment.deleteOne(db, key: paymentUUID) }
+    }
+
+    /// Pagos con problema de sincronización (rechazados), para el panel de problemas.
+    func failedPayments() throws -> [AccountPayment] {
+        try database.dbQueue.read { db in
+            try AccountPayment
+                .filter(Column("sync_status") == QueueSyncStatus.failed.rawValue)
+                .order(Column("created_at")).fetchAll(db)
         }
     }
 
@@ -111,7 +146,42 @@ struct CarteraRepository {
             guard var request = try CreditRequest.fetchOne(db, key: requestUUID) else { return }
             request.syncStatus = .synced
             request.syncedAt = now()
+            request.failureReason = nil
             try request.update(db)
+        }
+    }
+
+    /// Marca una solicitud como RECHAZADA permanentemente (4xx), con el motivo del servidor.
+    func markCreditRequestFailed(requestUUID: String, reason: String) throws {
+        try database.dbQueue.write { db in
+            guard var request = try CreditRequest.fetchOne(db, key: requestUUID) else { return }
+            request.syncStatus = .failed
+            request.failureReason = reason
+            try request.update(db)
+        }
+    }
+
+    /// Reintenta una solicitud fallida: la devuelve a la cola (`queued`).
+    func retryCreditRequest(requestUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard var request = try CreditRequest.fetchOne(db, key: requestUUID) else { return }
+            request.syncStatus = .queued
+            request.failureReason = nil
+            try request.update(db)
+        }
+    }
+
+    /// Descarta una solicitud (arrastra sus líneas por ON DELETE CASCADE).
+    func discardCreditRequest(requestUUID: String) throws {
+        try database.dbQueue.write { db in _ = try CreditRequest.deleteOne(db, key: requestUUID) }
+    }
+
+    /// Solicitudes con problema de sincronización (rechazadas), para el panel de problemas.
+    func failedCreditRequests() throws -> [CreditRequest] {
+        try database.dbQueue.read { db in
+            try CreditRequest
+                .filter(Column("sync_status") == QueueSyncStatus.failed.rawValue)
+                .order(Column("created_at")).fetchAll(db)
         }
     }
 }

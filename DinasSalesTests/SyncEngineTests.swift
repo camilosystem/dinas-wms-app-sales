@@ -5,7 +5,7 @@ import GRDB
 /// Stub de sincronización: devuelve páginas fijas, registra el `since` recibido y
 /// captura las órdenes subidas. Uso secuencial en tests (con `await` entre accesos):
 /// `@unchecked Sendable` es seguro aquí.
-private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
+private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, CarteraUploadAPI, @unchecked Sendable {
     var catalog: CatalogPage
     var clients: ClientsPage
     /// Estados de órdenes que devuelve `GET /sync/orders` (★ v0.4.1).
@@ -55,11 +55,35 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
         return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: "N-\(postedUUIDs.count)",
                                 status: "SINCRONIZADA", holdReason: nil, receivedAt: nil)
     }
+
+    // Cartera (★ v0.17.0)
+    private(set) var postedPaymentUUIDs: [String] = []
+    private(set) var postedRequestUUIDs: [String] = []
+    /// Si es no-nil, los POST de cartera lanzan ese error (para probar 4xx/transitorio).
+    var carteraPostError: Error?
+
+    func uploadEvidencePhoto(imageBase64: String, clientCode: String?) async throws -> String {
+        if let carteraPostError { throw carteraPostError }
+        return "https://mid/e/1.jpg"
+    }
+    func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted {
+        if let carteraPostError { throw carteraPostError }
+        postedPaymentUUIDs.append(payment.paymentUUID)
+        return AccountPaymentAccepted(paymentUUID: payment.paymentUUID,
+                                      status: "PENDIENTE_APROBACION", receivedAt: nil)
+    }
+    func postCreditRequest(_ request: CreditRequest,
+                           lines: [CreditRequestLine]) async throws -> CreditRequestAccepted {
+        if let carteraPostError { throw carteraPostError }
+        postedRequestUUIDs.append(request.requestUUID)
+        return CreditRequestAccepted(requestUUID: request.requestUUID,
+                                     status: "PENDIENTE_APROBACION", receivedAt: nil)
+    }
 }
 
 /// Servidor simulado que deduplica por `client_uuid` (idempotencia REAL del lado
 /// servidor). Puede "perder" la respuesta de una petición que sí procesó.
-private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI, @unchecked Sendable {
+private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI, CarteraUploadAPI, @unchecked Sendable {
     /// UUIDs que el servidor persistió (con repetidos si hubiera un bug de dedup).
     private(set) var receivedOrderIDs: [String] = []
     private var orderNumbers: [String: String] = [:]
@@ -90,12 +114,17 @@ private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI, @unchecked Sen
         return OrderAcceptedDTO(clientUUID: order.clientUUID, orderNumber: number,
                                 status: "SINCRONIZADA", holdReason: nil, receivedAt: nil)
     }
+
+    // Cartera no se ejercita en estos tests (BD sin cola) → conformidad mínima.
+    func uploadEvidencePhoto(imageBase64: String, clientCode: String?) async throws -> String { throw APIError.notImplemented }
+    func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted { throw APIError.notImplemented }
+    func postCreditRequest(_ request: CreditRequest, lines: [CreditRequestLine]) async throws -> CreditRequestAccepted { throw APIError.notImplemented }
 }
 
 /// Stub con compuerta: `postOrder` se suspende hasta que el test llame `release()`.
 /// Permite mantener una sincronización "en vuelo" (con el flag puesto) mientras se
 /// dispara una segunda, de forma determinista (sin depender de timings).
-private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI {
+private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI, CarteraUploadAPI {
     private(set) var postCount = 0
     private var entered = false
     private var enteredCont: CheckedContinuation<Void, Never>?
@@ -128,6 +157,11 @@ private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI {
 
     func release() { releaseCont?.resume(); releaseCont = nil }
     func posts() -> Int { postCount }
+
+    // Cartera no se ejercita aquí → conformidad mínima.
+    func uploadEvidencePhoto(imageBase64: String, clientCode: String?) async throws -> String { throw APIError.notImplemented }
+    func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted { throw APIError.notImplemented }
+    func postCreditRequest(_ request: CreditRequest, lines: [CreditRequestLine]) async throws -> CreditRequestAccepted { throw APIError.notImplemented }
 }
 
 @MainActor

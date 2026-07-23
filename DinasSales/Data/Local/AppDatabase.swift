@@ -320,6 +320,13 @@ final class AppDatabase {
                           on: "credit_request_lines", columns: ["request_uuid"])
         }
 
+        // ★ v0.17.0 — Estado `.failed` en la cola de cartera: un rechazo permanente (4xx) guarda
+        // el motivo para que el vendedor lo vea y decida (mismo principio que `orders.rejected`).
+        migrator.registerMigration("v10_cartera_failed") { db in
+            try db.alter(table: "account_payments") { t in t.add(column: "failure_reason", .text) }
+            try db.alter(table: "credit_requests") { t in t.add(column: "failure_reason", .text) }
+        }
+
         return migrator
     }
 }

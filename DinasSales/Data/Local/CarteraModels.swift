@@ -32,9 +32,13 @@ enum CreditRequestMode: String, Codable, Equatable {
 /// - `.queued`: envío SIN foto, en cola local pendiente de subir (lo sube el `SyncEngine`).
 /// - `.synced`: ya está en el servidor. Sea porque se subió desde la cola, o porque se envió
 ///   SÍNCRONO con foto (ese flujo nunca pasa por la cola: subir foto → crear, misma sesión).
+/// - `.failed`: el servidor lo RECHAZÓ de forma permanente (4xx). Se guarda el motivo y el
+///   vendedor decide (corregir/reintentar o descartar) — no se reintenta en silencio. Mismo
+///   principio que `.rejected` en órdenes.
 enum QueueSyncStatus: String, Codable, Equatable {
     case queued
     case synced
+    case failed
 }
 
 /// Imputación propuesta a UNA factura (`InvoiceApplication`). Parte de `proposed_applications`.
@@ -68,6 +72,8 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
     var syncStatus: QueueSyncStatus
     var createdAt: Date
     var syncedAt: Date?
+    /// Motivo del rechazo del servidor si `sync_status == .failed` (para mostrar al vendedor).
+    var failureReason: String?
 
     var id: String { paymentUUID }
     static let databaseTableName = "account_payments"
@@ -82,6 +88,7 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
         case syncStatus = "sync_status"
         case createdAt = "created_at"
         case syncedAt = "synced_at"
+        case failureReason = "failure_reason"
     }
 }
 
@@ -103,6 +110,8 @@ struct CreditRequest: Codable, FetchableRecord, PersistableRecord, Identifiable,
     var syncStatus: QueueSyncStatus
     var createdAt: Date
     var syncedAt: Date?
+    /// Motivo del rechazo del servidor si `sync_status == .failed`.
+    var failureReason: String?
 
     var id: String { requestUUID }
     static let databaseTableName = "credit_requests"
@@ -117,6 +126,7 @@ struct CreditRequest: Codable, FetchableRecord, PersistableRecord, Identifiable,
         case syncStatus = "sync_status"
         case createdAt = "created_at"
         case syncedAt = "synced_at"
+        case failureReason = "failure_reason"
     }
 }
 

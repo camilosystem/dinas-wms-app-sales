@@ -10,7 +10,7 @@ import os
 @MainActor
 final class SyncEngine: ObservableObject {
     private let database: AppDatabase
-    private let api: SyncDownAPI & SyncUpAPI
+    private let api: SyncDownAPI & SyncUpAPI & CarteraUploadAPI
     /// Se invoca cuando el middleware responde 401 (token ausente/expirado) → re-login.
     var onUnauthorized: () -> Void
 
@@ -27,7 +27,7 @@ final class SyncEngine: ObservableObject {
     private static let lastSyncKey = "sync.lastSyncedAt"
 
     init(database: AppDatabase,
-         api: SyncDownAPI & SyncUpAPI,
+         api: SyncDownAPI & SyncUpAPI & CarteraUploadAPI,
          onUnauthorized: @escaping () -> Void = {},
          now: @escaping () -> Date = Date.init,
          defaults: UserDefaults = .standard) {
@@ -47,6 +47,7 @@ final class SyncEngine: ObservableObject {
     }
 
     private var ordersRepo: OrdersRepository { OrdersRepository(database: database) }
+    private var carteraRepo: CarteraRepository { CarteraRepository(database: database) }
 
     /// Sincronización completa: sube órdenes confirmadas y baja catálogo + clientes.
     /// Sube primero para no perder trabajo del vendedor si la bajada falla.
@@ -63,6 +64,7 @@ final class SyncEngine: ObservableObject {
         do {
             let pendingBefore = (try? ordersRepo.confirmedOrders().count) ?? 0
             let failed = try await pushConfirmedOrders()
+            try await pushPendingCartera()
             try await pullCatalog()
             try await pullClients()
             try await pullOrderStatuses()
@@ -182,6 +184,47 @@ final class SyncEngine: ObservableObject {
             }
         }
         return failed
+    }
+
+    /// Sube los pagos y solicitudes de crédito EN COLA (los envíos SIN foto). Mismo criterio que
+    /// las órdenes: éxito → `synced`; rechazo PERMANENTE (4xx) → `failed` con el motivo (el
+    /// vendedor lo ve en el panel de problemas y decide); error transitorio → se deja en cola para
+    /// reintentar. Un 401 se propaga (re-login). Los envíos CON foto no pasan por aquí (síncronos).
+    private func pushPendingCartera() async throws {
+        let repo = carteraRepo
+
+        for payment in (try? repo.pendingPayments()) ?? [] {
+            do {
+                _ = try await api.postAccountPayment(payment)
+                try repo.markPaymentSynced(paymentUUID: payment.paymentUUID)
+                AppLog.sync.info("pago \(payment.paymentUUID, privacy: .public) sincronizado")
+            } catch APIError.unauthorized {
+                throw APIError.unauthorized
+            } catch let error as APIError where error.isPermanent {
+                let reason = error.serverMessage ?? "El servidor rechazó el pago (\(error.serverStatus))."
+                try? repo.markPaymentFailed(paymentUUID: payment.paymentUUID, reason: reason)
+                AppLog.sync.error("pago \(payment.paymentUUID, privacy: .public) RECHAZADO: \(reason, privacy: .public)")
+            } catch {
+                AppLog.sync.error("pago \(payment.paymentUUID, privacy: .public) no se pudo subir: \(String(describing: error), privacy: .public)")
+            }
+        }
+
+        for request in (try? repo.pendingCreditRequests()) ?? [] {
+            do {
+                let lines = (try? repo.lines(requestUUID: request.requestUUID)) ?? []
+                _ = try await api.postCreditRequest(request, lines: lines)
+                try repo.markCreditRequestSynced(requestUUID: request.requestUUID)
+                AppLog.sync.info("solicitud \(request.requestUUID, privacy: .public) sincronizada")
+            } catch APIError.unauthorized {
+                throw APIError.unauthorized
+            } catch let error as APIError where error.isPermanent {
+                let reason = error.serverMessage ?? "El servidor rechazó la solicitud (\(error.serverStatus))."
+                try? repo.markCreditRequestFailed(requestUUID: request.requestUUID, reason: reason)
+                AppLog.sync.error("solicitud \(request.requestUUID, privacy: .public) RECHAZADA: \(reason, privacy: .public)")
+            } catch {
+                AppLog.sync.error("solicitud \(request.requestUUID, privacy: .public) no se pudo subir: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     /// Sube UNA orden confirmada (p. ej. un vencido que el vendedor decide enviar). Viaja
