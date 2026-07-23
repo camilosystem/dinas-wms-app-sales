@@ -11,4 +11,14 @@ extension View {
         self
         #endif
     }
+
+    /// `.insetGrouped` solo existe en iOS; en macOS (host de los tests) usa el estilo por defecto.
+    @ViewBuilder
+    func insetGroupedListStyleCompat() -> some View {
+        #if os(iOS)
+        self.listStyle(.insetGrouped)
+        #else
+        self
+        #endif
+    }
 }

@@ -63,6 +63,36 @@ final class ClientsRepositoryTests: XCTestCase {
         XCTAssertEqual(Set(try repo.clients(matching: "ALMACÉN").map(\.clientCode)), ["CL-100"])
     }
 
+    @MainActor
+    func test_groupByCity_ciudadesAlfabeticas_clientesPorNombre_sinCiudadAlFinal() {
+        let clients = [
+            client("C1", name: "Zeta Store", city: "Bogotá"),
+            client("C2", name: "Alfa Market", city: "Bogotá"),
+            client("C3", name: "Beta Shop", city: "Astoria"),
+            client("C4", name: "Gamma", city: nil),      // sin ciudad
+            client("C5", name: "Delta", city: "   "),     // ciudad en blanco → sin ciudad
+        ]
+
+        let sections = ClientsViewModel.groupByCity(clients)
+
+        // Ciudades alfabéticas, "Sin ciudad" al final.
+        XCTAssertEqual(sections.map(\.city), ["Astoria", "Bogotá", "Sin ciudad"])
+        XCTAssertTrue(sections.last!.isNoCity)
+        // Dentro de Bogotá, por nombre.
+        XCTAssertEqual(sections[1].clients.map(\.name), ["Alfa Market", "Zeta Store"])
+        // Nulo y en blanco caen en "Sin ciudad".
+        XCTAssertEqual(Set(sections.last!.clients.map(\.clientCode)), ["C4", "C5"])
+    }
+
+    /// Búsqueda + agrupación: si el filtro deja fuera a todos los de una ciudad, esa sección
+    /// no aparece (no se muestra vacía).
+    @MainActor
+    func test_groupByCity_ciudadSinResultados_noGeneraSeccion() {
+        let filtrados = [client("C3", name: "Beta Shop", city: "Astoria")]  // Bogotá quedó fuera
+        let sections = ClientsViewModel.groupByCity(filtrados)
+        XCTAssertEqual(sections.map(\.city), ["Astoria"])
+    }
+
     func test_client_porCodigo() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db, [client("X-1", name: "Uno")])
