@@ -1,9 +1,346 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.11.0
+  version: 0.17.7
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.7 — EVIDENCIA OPCIONAL TAMBIÉN EN account-payments
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ CAMBIA
+      evidence_image_url en AccountPaymentCreate pasa de OBLIGATORIA (desde
+      v0.17.2) a OPCIONAL. Decisión de negocio: no exigir foto de evidencia
+      para reportar un pago de cartera. account-payments y credit-requests
+      quedan ahora simétricos en este punto — evidencia opcional en ambos.
+
+    ★ IMPACTO CONOCIDO
+      Esto reabre trabajo ya cerrado en dinas-wms-middleware: la validación
+      de 400 sin evidencia, la columna NOT NULL en AccountPayments, y los
+      tests que verificaban "sin foto → 400" deben actualizarse. También
+      afecta el diseño de conectividad obligatoria en dinas-wms-app-sales:
+      Reportar Pago pasa a requerir conexión solo CUANDO el vendedor adjunta
+      foto, igual que Solicitar Crédito — no siempre.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.6 — PARIDAD DE BANDEJAS Y invoice_doc_num OPCIONAL
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ CORRIGE
+      1. PendingCreditRequest ahora incluye client_statement, igual que
+         PendingAccountPayment. El contrato original se había quedado sin
+         este campo aunque el diseño acordado decía "mismo patrón de
+         enriquecimiento" para ambas bandejas — detectado por el agente de
+         middleware antes de construir el endpoint.
+      2. invoice_doc_num en CreditRequestCreate/PendingCreditRequest pasa a
+         ser OPCIONAL (nullable). Quedó como obligatorio por error en el
+         contrato original; ya se había decidido que un crédito general del
+         cliente puede no referenciar ninguna factura específica.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.5 — FACTURAS ABIERTAS EN LA SINCRONIZACIÓN OFFLINE
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      GET /sync/clients ahora incluye open_invoices por cliente (nuevo schema
+      OpenInvoiceSummary). Cierra un vacío real: se había decidido que las
+      facturas abiertas viajan offline "como el catálogo" para que el
+      vendedor pueda proponer proposed_applications en POST /account-payments
+      sin conexión, pero nunca se definió dónde viven esos datos en el
+      payload de sync. Se extendió /sync/clients (en vez de crear un
+      endpoint de sync aparte) para mantener un solo lugar de sincronización
+      de datos por cliente.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.4 — DOCUMENTAR 403 EN GET /evidence-photos/{id}
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ CORRIGE
+      Ajuste de documentación, sin cambio de comportamiento: el 403 ya
+      ocurría en la implementación (gate de roles vía [Authorize]), pero no
+      estaba documentado en las respuestas del endpoint, a diferencia de
+      todos los demás endpoints admin del contrato. Detectado por el agente
+      de middleware durante la verificación con curl real.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.3 — SERVIR LA EVIDENCIA DE VUELTA
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      GET /evidence-photos/{id} — sirve los bytes de la imagen ya subida.
+      Vacío detectado durante la implementación en middleware: existía el
+      POST para subir, pero nada para que el Dashboard mostrara la imagen en
+      la bandeja de aprobación sin salir de la pantalla. evidence_image_url
+      (devuelto por el POST) es la misma ruta relativa que sirve este GET.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.2 — ENDPOINT DE SUBIDA DE EVIDENCIA
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      POST /evidence-photos — endpoint compartido para subir la foto de
+      evidencia (base64) y recibir de vuelta evidence_image_url, ANTES de
+      reportar el pago o la solicitud de crédito. Corrige un vacío real: el
+      contrato ya usaba evidence_image_url (como si la imagen ya estuviera
+      subida) pero no existía ningún endpoint que la produjera.
+
+    ★ CORRECCIÓN
+      evidence_image_url pasa a ser OBLIGATORIA en AccountPaymentCreate
+      (coherente con la decisión de que la foto es obligatoria en pagos de
+      cartera). Sigue siendo opcional en CreditRequestCreate (decisión ya
+      vigente: la foto no es obligatoria en solicitudes de crédito, en
+      ninguna modalidad).
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.1 — ESTADO DE ERROR DE INTEGRACIÓN SAP
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Se añade el valor ERROR_INTEGRACION al enum compartido ApprovalStatus.
+      Motivo: si la integración a SAP (IncomingPayments / CreditNotes) falla
+      DESPUÉS de que el aprobador ya aprobó un account-payment o credit-request,
+      el registro no puede quedar como APROBADO (SAP no lo recibió) ni como
+      PENDIENTE_APROBACION (ya fue revisado, no debe volver a la bandeja de
+      pendientes por aprobar). ERROR_INTEGRACION distingue ese caso para que
+      el Dashboard pueda mostrarlo y ofrecer reintentar la integración sin
+      pedirle al aprobador que apruebe de nuevo.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.0 — PAGOS Y CRÉDITOS (procesos secundarios app vendedores)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Dos flujos nuevos del vendedor, ambos con aprobación en el Dashboard
+      antes de integrar a SAP:
+        · POST /account-payments   — Reportar un pago (aplicado a cartera)
+        · POST /credit-requests    — Solicitar una Nota de Crédito
+
+    ★ NOMBRE "account-payments", NO "payments"
+      El bloque 4C (v0.16.0) ya usa `payments`/`payments-admin` para el dinero
+      que el DRIVER recoge en ruta (efectivo/cheque suelto, sin aplicar a
+      factura). Este es un concepto DISTINTO: el vendedor reporta un pago que
+      se APLICA a facturas específicas de cartera (vw_CxC). Para no colisionar
+      recursos ni confundir el mismo payment_uuid con dos significados
+      distintos, este bloque usa `account-payments` como namespace propio.
+
+    ★ EL VENDEDOR PROPONE, EL APROBADOR CONFIRMA
+      Mismo principio que cartera (v0.4.0): la app registra la intención, el
+      middleware/Dashboard decide antes de tocar SAP.
+        · Pago: el vendedor puede proponer a qué facturas se aplica
+          (`proposed_applications`), pero el APROBADOR_PAGOS confirma o
+          reemplaza esa imputación con montos editables por factura. Si el
+          total no cuadra exacto contra las facturas, el sobrante/faltante
+          queda como PAGO_A_CUENTA sin aplicar (no bloquea la aprobación).
+        · Crédito: dos modalidades — CON ítems (monto calculado de las
+          líneas) o SIN ítems (monto manual). En la modalidad sin ítems, la
+          cuenta de G/L se resuelve automáticamente por `reason`
+          (Damaged/Doesn't want it/Mistake/Short) vía configuración — nunca
+          elegida a mano por el aprobador.
+
+    ★ ROLES NUEVOS
+      APROBADOR_PAGOS y APROBADOR_CREDITOS, separados desde el inicio (no
+      comparten con ADMIN), para que la aprobación de dinero tenga su propio
+      permiso.
+
+    ★ INTEGRACIÓN A SAP
+      Al aprobar: POST → SAP (IncomingPayments para pagos, CreditNotes para
+      créditos). La integración ocurre en la aprobación, NUNCA en el reporte
+      del vendedor.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.16.0 — RECOGER PAGO (Bloque 4C) · cierra la app de driver
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ ESTE BLOQUE TOCA DINERO — merece más cuidado que los demás
+      Los otros bloques registran INFORMACIÓN; este registra DINERO RECIBIDO.
+      Un retorno perdido se reconstruye preguntándole al cliente; un pago
+      perdido significa que alguien entregó efectivo sin constancia, y eso puede
+      terminar en una acusación a un driver honesto.
+      De ahí las dos reglas duras:
+        · IDEMPOTENCIA obligatoria (payment_uuid generado por la app). Un pago
+          duplicado es tan malo como uno perdido.
+        · REGISTRO INMUTABLE: un pago NO se edita ni se borra. Si hubo error se
+          ANULA, dejando el rastro.
+
+    ★ QUÉ REGISTRA
+      Cliente (de SU ruta), monto, tipo (CASH o CHEQUE) y la hora real.
+      · CHEQUE: número de cheque + FOTO OBLIGATORIA (es un documento físico;
+        fotografiarlo protege al driver y a la empresa).
+      · CASH: sin foto (no hay documento que fotografiar).
+
+    ★ NO SE APLICA A FACTURAS
+      Es un monto suelto. El admin lo aplica después en SAP. Nada se escribe a
+      SAP desde aquí.
+
+    ★ ANULACIÓN CON RASTRO
+      El driver puede anular un pago mal registrado, con MOTIVO OBLIGATORIO.
+      El registro NO desaparece: queda como anulado, con quién, cuándo y por qué.
+      Se puede anular EN CUALQUIER MOMENTO, incluso con la ruta ya cerrada —
+      el error suele notarse al cuadrar la caja en la bodega.
+
+    ★ EL DRIVER VE SU CAJA
+      Total recogido en la ruta, separado por CASH y CHEQUE. Al terminar trae
+      ese dinero encima y necesita saber cuánto es.
+      Los anulados NO suman.
+
+    ★ OFFLINE igual que todo: se encola, `occurred_at` lleva la hora real.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.15.0 — RETORNO DE PRODUCTO (Bloque 4B)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ ES
+      El cliente devuelve mercancía de FACTURAS ANTERIORES (no de la entrega de
+      hoy — eso son los rejected_items del 4A). El driver la recibe durante su
+      visita, la documenta con una FOTO, y queda registrada para el admin.
+
+    ★ ES UN REGISTRO, NO UN MOVIMIENTO DE INVENTARIO
+      Nada se escribe a SAP. El admin lo procesa manualmente. Cuando exista
+      BIN LOAD, ahí se decidirá el reingreso al stock.
+
+    ★ EL CLIENTE ES DE SU RUTA
+      No se busca entre todos los clientes: el retorno es de una de las paradas
+      que el driver ya tiene descargadas. Si no va a pasar por ese cliente, no
+      hay quien le entregue la mercancía.
+      Puede registrarlo en CUALQUIER MOMENTO de la ruta, no solo estando en esa
+      parada.
+
+    ★ EL ÍTEM SE BUSCA EN EL CATÁLOGO COMPLETO
+      Un retorno es de compras anteriores, así que el ítem puede NO estar en el
+      camión de hoy. La app descarga el catálogo de ítems vendibles junto con la
+      ruta (~540 ítems) para poder buscar sin conexión, por código o nombre.
+
+    ★ VARIOS ÍTEMS POR RETORNO, UNA FOTO
+      Cada ítem con su cantidad y su motivo: DANADO · EXPIRADO · NO_LO_QUIERE.
+      La FOTO es OBLIGATORIA — es la evidencia de lo que se recibió.
+
+    ★ LA FOTO VIAJA EN EL MISMO POST (base64)
+      La app la REDIMENSIONA antes de enviar (~1024px, calidad ~70% → 150-300KB).
+      Una sola petición: o entra el retorno completo con su foto, o no entra.
+      Eso es lo que exige que la foto sea obligatoria — un segundo paso podría
+      fallar y dejar retornos sin evidencia.
+      El middleware la guarda EN DISCO y conserva la ruta en la base.
+
+    ★ OFFLINE — con idempotencia explícita
+      Se encola como todo lo demás. La foto se guarda local hasta que haya
+      señal. `occurred_at` lleva la hora real de la visita.
+      ★ `return_uuid` lo GENERA LA APP y hace el POST idempotente. Es necesario
+      porque un retorno no tiene identidad natural (a diferencia de `deliver`,
+      cuya clave es el order_uuid): el mismo cliente puede devolver lo mismo dos
+      veces el mismo día. Sin esa clave, si el servidor procesa y la señal se
+      cae antes de que llegue la respuesta, el reintento crearía un DUPLICADO
+      con su foto. Con ella, el reintento devuelve 200 con el registro existente.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.14.0 — DESPACHO / APP DE DRIVER (Bloque 4A)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ ALCANCE: solo el DESPACHO (la ruta y las entregas en la calle).
+      El RETORNO DE PRODUCTO (con foto) es el 4B y el RECOGER PAGO el 4C.
+
+    ★ ROL NUEVO: DRIVER
+      Usuario propio del WMS, como BODEGUERO. Solo despacha.
+
+    ★ ASIGNACIÓN DIRIGIDA
+      El ADMIN asigna un camión ALISTADO a UN driver. Un driver, UN camión a la
+      vez. El driver no elige.
+
+    ★ ESTADOS NUEVOS DEL CAMIÓN
+        ALISTADO → (admin asigna driver) → ASIGNADO_DRIVER
+                 → (driver inicia ruta)  → EN_RUTA
+                 → (driver termina ruta) → RUTA_CERRADA
+
+    ★ EL ESTADO DEL PEDIDO SE DERIVA (no lo elige el driver)
+      El driver marca qué pasó con la MERCANCÍA; el middleware deduce el
+      resultado:
+        · nada rechazado           → ENTREGADO
+        · algo rechazado           → ENTREGADO_PARCIAL
+        · salida rápida de pedido  → NO_ENTREGADO (con motivo de pedido)
+      Reusa los mismos estados y motivos del 3A: el driver ahora los registra en
+      la calle en vez del admin en el escritorio.
+
+    ★ ORDEN DE PARADAS: el driver reordena SOLO EN SU VISTA
+      Puede arrastrar si le conviene por la calle. Recibe un AVISO de que
+      cambiar el orden puede afectar el orden en que están cargados los pallets
+      — pero NO se le bloquea. El orden guardado por el admin NO cambia.
+      Es una preferencia local del dispositivo, no un dato del camión.
+
+    ★ OFFLINE TOTAL — requisito duro
+      El driver debe poder trabajar TODA la ruta sin conexión. Al asignarle el
+      camión se descarga todo (paradas, pedidos, líneas, clientes, direcciones)
+      y lo que registre se encola hasta que haya señal.
+      La app AVISA claramente si el driver no ha descargado su ruta.
+
+    ★ ADMIN Y DRIVER COEXISTEN
+      El admin puede seguir registrando/corrigiendo entregas desde el Dashboard
+      aunque haya driver asignado (el endpoint del 3A ya es idempotente).
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.13.0 — PICKING EN CURSO (Bloque 3C) · cierra el roadmap
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ EL PROBLEMA QUE RESUELVE
+      Hoy el admin queda A CIEGAS entre "asigné el camión" y "apareció ALISTADO".
+      No sabe si el bodeguero va por la mitad, si se atascó, ni si hay faltantes.
+      Con DOS CARRILES es peor: dos personas trabajando y no ve a ninguna.
+
+      Los endpoints /picking/* son del BODEGUERO (filtrados por su token), así
+      que el Dashboard no puede usarlos. Este es su equivalente de solo lectura
+      bajo /admin/*.
+
+    ★ QUÉ ES
+      GET /admin/picking-board — el piso de la bodega de un vistazo: todos los
+      camiones activos, con el avance de CADA CARRIL y sus faltantes.
+
+    ★ QUÉ ENTRA
+      · Los camiones que se están trabajando: ASIGNADO, EN_PICKING, EN_REPARTICION.
+      · Más los ALISTADOS de HOY (para ver lo ya terminado en la jornada).
+
+    ★ POR CARRIL (los dos van a su ritmo, se muestran por separado)
+      · quién lo tiene (bodeguero)
+      · en qué fase va (LaneStatus)
+      · cuánto lleva (fracción de recolección y de repartición)
+      · sus FALTANTES CON DETALLE: qué ítem y cuánto faltó — es lo único sobre
+        lo que el admin puede ACTUAR mientras el bodeguero trabaja (llamar al
+        proveedor, avisar al vendedor).
+
+    ★ PURAMENTE LECTURA. No hay operación ni estado nuevo.
+      El Dashboard lo refresca solo (~30s) para ver el movimiento en vivo.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.12.0 — TABLERO DE CARGA (Bloque 3B)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ ES
+      El tablero de PLANIFICACIÓN del admin de bodega: qué hay que despachar
+      cada día de la semana, agrupado por shipping code, con las sumatorias y
+      —lo accionable— cuántos pedidos YA van en camión y cuántos NO.
+
+    ★ EL EJE: LUNES a VIERNES + columna SIN_DIA
+      Sábado y domingo se IGNORAN. Un shipping code configurado solo para fin
+      de semana deja sus pedidos sin día asignable → caen en SIN_DIA.
+
+    ★ CADA PEDIDO CAE EN UN SOLO DÍA (no se duplica)
+      El PRÓXIMO día de entrega de su shipping code contado DESDE HOY.
+      Un shipping code con varios días (ej. martes y viernes) NO reparte sus
+      pedidos: todos van al próximo disponible.
+
+    ★ ATRASADOS
+      Un pedido que ya existía cuando pasó su día de entrega y no se despachó
+      aparece en el próximo día disponible, MARCADO como atrasado. Es la señal
+      de que algo se quedó sin sacar.
+
+    ★ SIN_DIA — lo que no cae en ningún día
+      · pedidos sin shipping code
+      · shipping codes sin días configurados
+      · shipping codes configurados solo sábado/domingo
+
+    ★ QUÉ ENTRA
+      Todos los pedidos APROBADOS sin entregar. Es un tablero de lo que FALTA
+      despachar, no un histórico.
+
+    ★ PURAMENTE LECTURA — no hay operación ni estado nuevo.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.11.0 — ENTREGA (Bloque 3A) · cierre del ciclo del pedido
@@ -414,8 +751,8 @@ info:
        POST /admin/orders/{uuid}/reject  — rechazar
 
     ══════════════════════════════════════════════════════════════════════════
-    Fuera de alcance (NO implementar): pagos, créditos (notas), visitas,
-    gastos, promociones, picking, Deliveries, facturación a SAP.
+    Fuera de alcance (NO implementar): visitas, gastos, promociones,
+    facturación a SAP, BIN LOAD.
 
 servers:
   - url: https://api.dinas-wms.example.com/v1
@@ -426,6 +763,11 @@ tags:
   - name: sync-down
   - name: sync-up
   - name: credit
+  - name: account-payments
+    description: >
+      ★ v0.17.0 — Pagos de cartera reportados por el vendedor (aplicados a
+      facturas vw_CxC) y su aprobación. Distinto de `payments` (dinero
+      recogido por el driver en ruta).
   - name: admin
   - name: trucks
     description: Armado de camiones (despachos) por el administrador de bodega.
@@ -443,6 +785,20 @@ tags:
     description: Manifiesto de Ruta (informe final de entrega).
   - name: delivery
     description: Registro del resultado de la entrega (Bloque 3A).
+  - name: workload
+    description: Tablero de carga por día y shipping code (Bloque 3B).
+  - name: dispatch-admin
+    description: Asignación de camiones a drivers (Bloque 4A).
+  - name: dispatch
+    description: Despacho en la calle — la app del driver (Bloque 4A).
+  - name: returns
+    description: Retorno de producto desde la ruta (Bloque 4B).
+  - name: payments
+    description: Pagos recogidos en ruta por el DRIVER (Bloque 4C). No confundir con account-payments.
+  - name: payments-admin
+    description: Pagos de ruta vistos por el admin (Bloque 4C).
+  - name: returns-admin
+    description: Retornos vistos por el admin (Bloque 4B).
 
 paths:
   /auth/login:
@@ -496,6 +852,10 @@ paths:
 
         ★ v0.4.0: cada cliente incluye ahora su información de CRÉDITO
         (balance, cupo, mora). La app la usa para ADVERTIR offline.
+
+        ★ v0.17.5: cada cliente incluye ahora `open_invoices` (facturas
+        abiertas de vw_CxC), para que el vendedor pueda armar
+        `proposed_applications` en POST /account-payments sin conexión.
       parameters:
         - $ref: '#/components/parameters/Since'
       responses:
@@ -621,6 +981,313 @@ paths:
               schema: { $ref: '#/components/schemas/OrderAccepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.17.2 — SUBIDA DE EVIDENCIA (compartido por ambos flujos)
+  # ═══════════════════════════════════════════════════════════════
+  /evidence-photos:
+    post:
+      tags: [account-payments, credit-requests]
+      summary: Sube una foto de evidencia y devuelve su URL
+      description: >
+        ★ v0.17.2. Endpoint compartido por account-payments y credit-requests.
+        ★ v0.17.7: evidencia OPCIONAL en ambos flujos (antes obligatoria en
+        account-payments). La app sube la imagen en base64 aquí PRIMERO,
+        recibe `evidence_image_url`, y luego la incluye al reportar el pago
+        o la solicitud de crédito, si decide adjuntarla. No requiere
+        idempotencia por uuid — subir la misma imagen dos veces solo produce
+        dos archivos independientes, sin efecto sobre ningún registro de
+        negocio (el efecto real ocurre al crear el AccountPayment/CreditRequest
+        que referencia la URL).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvidencePhotoUpload' }
+      responses:
+        '201':
+          description: Imagen subida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidencePhotoUploaded' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /evidence-photos/{id}:
+    get:
+      tags: [account-payments, credit-requests]
+      summary: Sirve de vuelta una foto de evidencia ya subida
+      description: >
+        ★ v0.17.3. Necesario para que la bandeja de aprobación del Dashboard
+        muestre la imagen sin salir de la pantalla. `id` es el identificador
+        devuelto dentro de `evidence_image_url` por POST /evidence-photos —
+        `evidence_image_url` YA es la ruta relativa a este mismo GET (p. ej.
+        `/evidence-photos/3fa85f64-...`), no una URL externa aparte. Requiere
+        rol ADMIN, APROBADOR_PAGOS o APROBADOR_CREDITOS (no el vendedor que la
+        subió, salvo que sea dueño del registro — a criterio de implementación
+        si se necesita esa excepción).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Bytes de la imagen (JPEG/PNG)
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.17.0 — PAGOS DE CARTERA (account-payments)
+  # ═══════════════════════════════════════════════════════════════
+  /account-payments:
+    post:
+      tags: [account-payments]
+      summary: Reportar un pago de cartera tomado por el vendedor
+      description: >
+        ★ v0.17.0. Idempotente por `payment_uuid` (generado por la app, mismo
+        patrón que /orders). El vendedor PROPONE la imputación a facturas
+        (vw_CxC); el aprobador la confirma o modifica. Queda en
+        PENDIENTE_APROBACION hasta entonces.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountPaymentCreate' }
+      responses:
+        '201':
+          description: Pago creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountPaymentAccepted' }
+        '200':
+          description: Reintento idempotente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountPaymentAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /credit-requests:
+    post:
+      tags: [account-payments]
+      summary: Solicitar una Nota de Crédito
+      description: >
+        ★ v0.17.0. Dos modalidades: CON ítems (monto calculado de las líneas)
+        o SIN ítems (monto manual + razón, que determina la cuenta G/L).
+        Idempotente por `request_uuid`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreditRequestCreate' }
+      responses:
+        '201':
+          description: Solicitud creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditRequestAccepted' }
+        '200':
+          description: Reintento idempotente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditRequestAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/account-payments/pending:
+    get:
+      tags: [admin]
+      summary: Pagos de cartera pendientes de aprobación
+      description: ★ v0.17.0. REQUIERE rol ADMIN o APROBADOR_PAGOS.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Página de pagos pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page: { type: integer }
+                  page_size: { type: integer }
+                  total: { type: integer }
+                  payments:
+                    type: array
+                    items: { $ref: '#/components/schemas/PendingAccountPayment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/account-payments/{payment_uuid}/approve:
+    post:
+      tags: [admin]
+      summary: Aprobar (o modificar la imputación) de un pago de cartera
+      description: >
+        ★ v0.17.0. REQUIERE rol APROBADOR_PAGOS.
+        El aprobador puede CONFIRMAR la imputación propuesta o REEMPLAZARLA
+        con `applications` editado. Si la suma de `applications` no cubre el
+        `amount` total, el sobrante queda como PAGO_A_CUENTA (sin aplicar, no
+        bloquea). Al confirmar, dispara POST → SAP (IncomingPayments).
+      parameters:
+        - name: payment_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountPaymentApproval' }
+      responses:
+        '200':
+          description: Pago aprobado e integrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountPaymentDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El pago ya fue decidido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/account-payments/{payment_uuid}/reject:
+    post:
+      tags: [admin]
+      summary: Rechazar un pago de cartera reportado
+      description: ★ v0.17.0. REQUIERE rol APROBADOR_PAGOS. Motivo obligatorio.
+      parameters:
+        - name: payment_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Pago rechazado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountPaymentDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El pago ya fue decidido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/credit-requests/pending:
+    get:
+      tags: [admin]
+      summary: Solicitudes de crédito pendientes de aprobación
+      description: ★ v0.17.0. REQUIERE rol ADMIN o APROBADOR_CREDITOS.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Página de solicitudes pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page: { type: integer }
+                  page_size: { type: integer }
+                  total: { type: integer }
+                  credit_requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/PendingCreditRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/credit-requests/{request_uuid}/approve:
+    post:
+      tags: [admin]
+      summary: Aprobar una solicitud de crédito
+      description: >
+        ★ v0.17.0. REQUIERE rol APROBADOR_CREDITOS.
+        Al aprobar, dispara POST → SAP (CreditNotes). Si la solicitud es SIN
+        ítems, la cuenta G/L se resuelve automáticamente por `reason` (tabla
+        de configuración, no elegible manualmente).
+      parameters:
+        - name: request_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+      responses:
+        '200':
+          description: Solicitud aprobada e integrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditRequestDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ya fue decidida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/credit-requests/{request_uuid}/reject:
+    post:
+      tags: [admin]
+      summary: Rechazar una solicitud de crédito
+      description: ★ v0.17.0. REQUIERE rol APROBADOR_CREDITOS. Motivo obligatorio.
+      parameters:
+        - name: request_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Solicitud rechazada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditRequestDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ya fue decidida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /admin/orders:
     get:
@@ -2011,6 +2678,726 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /admin/workload:
+    get:
+      tags: [workload]
+      summary: Tablero de carga — qué despachar cada día
+      description: >
+        ★ v0.12.0 — REQUIERE rol ADMIN.
+        El tablero de planificación del admin de bodega. Puramente lectura.
+
+        Toma todos los pedidos APROBADOS sin entregar y los reparte en columnas
+        de LUNES a VIERNES (+ SIN_DIA), agrupados por shipping code.
+
+        Reglas de asignación de día:
+          · Cada pedido cae en UN SOLO día: el PRÓXIMO día de entrega de su
+            shipping code contado DESDE HOY. Un shipping code con varios días
+            NO reparte sus pedidos entre ellos.
+          · Sábado y domingo se IGNORAN.
+          · Sin shipping code, sin días configurados, o solo fin de semana
+            → columna SIN_DIA.
+          · Un pedido que ya existía cuando pasó su día y no se despachó se
+            marca ATRASADO (aparece en el próximo día disponible).
+      responses:
+        '200':
+          description: El tablero
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadBoard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/picking-board:
+    get:
+      tags: [picking-admin]
+      summary: Picking en curso — el piso de la bodega de un vistazo
+      description: >
+        ★ v0.13.0 — REQUIERE rol ADMIN. Puramente lectura.
+
+        Todos los camiones que se están trabajando (ASIGNADO, EN_PICKING,
+        EN_REPARTICION) más los ALISTADOS de HOY, con el avance de cada carril
+        y sus faltantes.
+
+        Resuelve la ceguera del admin entre "asigné" y "apareció ALISTADO":
+        ahora ve quién está trabajando qué, cuánto lleva, y dónde hay faltantes.
+
+        Los endpoints /picking/* son del bodeguero (filtrados por su token);
+        este es su equivalente de solo lectura para el admin.
+
+        El Dashboard lo refresca solo cada ~30s.
+      responses:
+        '200':
+          description: El tablero de picking
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PickingBoard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/drivers:
+    get:
+      tags: [dispatch-admin]
+      summary: Lista de drivers (para asignar camiones)
+      description: >
+        ★ v0.14.0 — REQUIERE ADMIN. Los usuarios con rol DRIVER, para que el
+        admin elija a quién asignar un camión. Indica si cada uno ya tiene un
+        camión activo (un driver, un camión a la vez).
+      responses:
+        '200':
+          description: Lista de drivers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drivers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        username: { type: string }
+                        display_name: { type: string }
+                        current_truck_id:
+                          type: string
+                          format: uuid
+                          nullable: true
+                          description: >
+                            El camión que ya tiene asignado (ASIGNADO_DRIVER o
+                            EN_RUTA). NULL si está libre.
+                        current_truck_name: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/trucks/{truck_id}/assign-driver:
+    post:
+      tags: [dispatch-admin]
+      summary: Asignar (o reasignar) un camión a un driver
+      description: >
+        ★ v0.14.0 — REQUIERE ADMIN.
+        El camión debe estar ALISTADO (ya picado) → 409 si no.
+        UN DRIVER, UN CAMIÓN A LA VEZ: si el driver ya tiene otro camión
+        ASIGNADO_DRIVER o EN_RUTA → 400.
+        ALISTADO → ASIGNADO_DRIVER. Reasignable mientras no esté EN_RUTA.
+      parameters:
+        - name: truck_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [driver_username]
+              properties:
+                driver_username: { type: string }
+      responses:
+        '200':
+          description: Camión asignado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TruckDetail' }
+        '400':
+          description: El driver no existe, o ya tiene otro camión activo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El camión no está ALISTADO, o ya salió (EN_RUTA)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/trucks/{truck_id}/unassign-driver:
+    post:
+      tags: [dispatch-admin]
+      summary: Quitarle el camión a un driver
+      description: >
+        ★ v0.14.0 — REQUIERE ADMIN. El camión vuelve a ALISTADO.
+        No se puede si ya está EN_RUTA o RUTA_CERRADA → 409.
+        (Cierra el ciclo: la asignación de driver es reversible antes de salir.)
+      parameters:
+        - name: truck_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Driver desasignado; el camión vuelve a ALISTADO
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TruckDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El camión ya salió (EN_RUTA/RUTA_CERRADA)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/my-route:
+    get:
+      tags: [dispatch]
+      summary: La ruta completa del driver (descarga para trabajar offline)
+      description: >
+        ★ v0.14.0 — REQUIERE rol DRIVER.
+        Devuelve TODO lo que el driver necesita para trabajar la ruta SIN
+        CONEXIÓN: paradas en orden, pedidos de cada parada, líneas de cada
+        pedido, cliente y dirección. Es la descarga que debe hacer antes de salir.
+        Sin camión asignado → 404 (la app avisa "no tienes ruta asignada").
+        ★ La app debe AVISAR CLARAMENTE si el driver no ha descargado su ruta.
+      responses:
+        '200':
+          description: La ruta completa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverRoute' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: El driver no tiene camión asignado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/start-route:
+    post:
+      tags: [dispatch]
+      summary: Iniciar la ruta (ASIGNADO_DRIVER → EN_RUTA)
+      description: >
+        ★ v0.14.0 — REQUIERE rol DRIVER con camión asignado.
+        Marca que salió a despachar. Idempotente: si ya está EN_RUTA, devuelve
+        el estado actual.
+      responses:
+        '200':
+          description: Ruta iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverRoute' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El camión no está ASIGNADO_DRIVER
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/orders/{order_uuid}/deliver:
+    post:
+      tags: [dispatch]
+      summary: Registrar la entrega de un pedido (desde la calle)
+      description: >
+        ★ v0.14.0 — REQUIERE rol DRIVER; el pedido debe ser de SU camión → 403.
+
+        ★ EL ESTADO SE DERIVA de lo que marca el driver — él NO lo elige:
+          · sin rejected_items y sin order_reason → ENTREGADO
+          · con rejected_items                    → ENTREGADO_PARCIAL
+          · con order_reason (salida rápida)      → NO_ENTREGADO
+
+        Los motivos son los mismos del Bloque 3A (ItemRejectionReason y
+        OrderRejectionReason). Lo NO entregado alimenta la lista de RETORNADOS.
+
+        Idempotente por pedido: reenviar ACTUALIZA (clave para el offline —
+        la cola puede reintentar sin duplicar).
+      parameters:
+        - name: order_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: >
+                O bien `order_reason` (no se entregó nada), o bien
+                `rejected_items` (entregó con novedades), o ninguno de los dos
+                (entregó todo). Mandar ambos → 400.
+              properties:
+                order_reason:
+                  allOf:
+                    - $ref: '#/components/schemas/OrderRejectionReason'
+                  nullable: true
+                  description: Salida rápida — no se entregó nada.
+                rejected_items:
+                  type: array
+                  description: Ítems que el cliente NO recibió, con su motivo.
+                  items:
+                    type: object
+                    required: [item_code, quantity, reason]
+                    properties:
+                      item_code: { type: string }
+                      quantity:
+                        type: number
+                        format: double
+                        description: Cuántas unidades NO se entregaron.
+                      reason: { $ref: '#/components/schemas/ItemRejectionReason' }
+                note: { type: string, nullable: true }
+                occurred_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: >
+                    ★ Cuándo ocurrió la entrega EN LA CALLE. Importante para el
+                    offline: si se registró sin señal y se sincroniza horas
+                    después, esta es la hora real, no la de llegada al servidor.
+      responses:
+        '200':
+          description: Entrega registrada; devuelve el estado derivado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryRecord' }
+        '400':
+          description: >
+            order_reason y rejected_items juntos; ítem que no es del pedido;
+            cantidad mayor a la que llevaba.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: El pedido no es del camión de este driver
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El camión no está EN_RUTA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/finish-route:
+    post:
+      tags: [dispatch]
+      summary: Terminar la ruta (EN_RUTA → RUTA_CERRADA)
+      description: >
+        ★ v0.14.0 — REQUIERE rol DRIVER con camión EN_RUTA.
+        Cierra la jornada del driver. Los pedidos sin registrar quedan como
+        estaban (PENDIENTE) — NO se fuerza un estado: el admin los cierra desde
+        el Dashboard si hace falta.
+        Devuelve el resumen de la ruta, incluida la lista de RETORNADOS.
+      responses:
+        '200':
+          description: Ruta cerrada, con el resumen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El camión no está EN_RUTA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/returns:
+    post:
+      tags: [returns]
+      summary: Registrar un retorno de producto (con foto)
+      description: >
+        ★ v0.15.0 — REQUIERE rol DRIVER con camión EN_RUTA.
+
+        El cliente devuelve mercancía de FACTURAS ANTERIORES. El driver la
+        recibe, la documenta con una foto, y queda registrada para el admin.
+        NO afecta inventario — es un registro (nada se escribe a SAP).
+
+        Reglas:
+          · El `client_code` debe ser de una parada de SU ruta → 400 si no.
+          · Al menos un ítem, cada uno con cantidad > 0 y motivo.
+          · La FOTO es OBLIGATORIA (base64, ya redimensionada por la app).
+          · `occurred_at` = la hora real de la visita (clave para el offline).
+
+        La app manda todo en UNA petición: o entra el retorno completo con su
+        evidencia, o no entra.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [return_uuid, client_code, items, photo_base64]
+              properties:
+                return_uuid:
+                  type: string
+                  format: uuid
+                  description: >
+                    ★ v0.15.0 — Identidad del retorno, GENERADA POR LA APP.
+                    Hace el POST idempotente: si el servidor ya procesó este
+                    return_uuid, devuelve 200 con el registro existente en vez
+                    de crear un duplicado.
+                    Es necesario porque un retorno NO tiene identidad natural
+                    (a diferencia de `deliver`, cuya clave es el order_uuid):
+                    el mismo cliente puede devolver lo mismo dos veces el mismo
+                    día legítimamente. Sin esta clave, un reintento tras
+                    perderse la respuesta crearía un retorno duplicado con su
+                    foto.
+                client_code:
+                  type: string
+                  description: El cliente que devuelve. Debe ser una parada de su ruta.
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [item_code, quantity, reason]
+                    properties:
+                      item_code: { type: string }
+                      quantity: { type: number, format: double }
+                      reason: { $ref: '#/components/schemas/ProductReturnReason' }
+                photo_base64:
+                  type: string
+                  description: >
+                    La foto en base64, SIN el prefijo data-uri. La app la
+                    redimensiona antes (~1024px, calidad ~70%) para que pese
+                    150-300KB. OBLIGATORIA.
+                note: { type: string, nullable: true }
+                occurred_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: >
+                    Cuándo ocurrió la visita. Si se registró sin señal y
+                    sincroniza después, esta es la hora real.
+                client_reference:
+                  type: string
+                  nullable: true
+                  description: >
+                    Referencia opcional que dé el cliente (número de factura,
+                    remisión). Texto libre — no se valida contra nada.
+      responses:
+        '201':
+          description: Retorno registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductReturn' }
+        '200':
+          description: >
+            ★ Este return_uuid YA fue procesado — devuelve el registro existente
+            sin crear un duplicado. Es la respuesta al reintento de una app que
+            no recibió la confirmación.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductReturn' }
+        '400':
+          description: >
+            Cliente que no es de su ruta; sin ítems; cantidad inválida; ítem
+            que no existe; foto ausente o ilegible.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: El camión no está EN_RUTA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/returns/mine:
+    get:
+      tags: [returns]
+      summary: Los retornos que registró el driver en esta ruta
+      description: >
+        ★ v0.15.0 — REQUIERE rol DRIVER. Para que el driver revise lo que lleva
+        registrado. No incluye la foto (solo si la tiene).
+      responses:
+        '200':
+          description: Los retornos de su ruta actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  returns:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProductReturn' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/returns:
+    get:
+      tags: [returns-admin]
+      summary: Retornos de producto registrados
+      description: >
+        ★ v0.15.0 — REQUIERE ADMIN. Lo que los drivers han recibido de vuelta.
+        El admin lo procesa manualmente (no hay movimiento de inventario
+        automático).
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Desde esta fecha (inclusive). Por defecto, hoy.
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Hasta esta fecha (inclusive). Por defecto, hoy.
+      responses:
+        '200':
+          description: Los retornos del período
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  returns:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProductReturn' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/returns/{return_id}/photo:
+    get:
+      tags: [returns-admin]
+      summary: La foto de un retorno
+      description: >
+        ★ v0.15.0 — REQUIERE ADMIN. Devuelve la imagen para verla en el
+        Dashboard. El middleware la sirve desde disco.
+      parameters:
+        - name: return_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: La imagen
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /dispatch/payments:
+    post:
+      tags: [payments]
+      summary: Registrar un pago recibido en ruta (dinero del DRIVER)
+      description: >
+        ★ v0.16.0 — REQUIERE rol DRIVER con camión EN_RUTA.
+
+        El driver recibe dinero del cliente durante la visita. Es un REGISTRO —
+        el admin lo aplica después en SAP; nada se escribe a SAP desde aquí.
+        NO es lo mismo que /account-payments (v0.17.0): esto es efectivo/cheque
+        suelto recogido en ruta; account-payments es un pago del vendedor
+        aplicado directamente a facturas de cartera.
+
+        Reglas:
+          · `payment_uuid` lo GENERA LA APP → idempotente. Si ya fue procesado,
+            devuelve 200 con el registro existente. Un pago duplicado es tan
+            grave como uno perdido.
+          · El `client_code` debe ser de una parada de SU ruta → 400 si no.
+          · `amount` > 0.
+          · CHEQUE: `check_number` y `photo_base64` OBLIGATORIOS.
+          · CASH: sin foto ni número de cheque (mandarlos → 400).
+          · `occurred_at` = la hora real de la visita.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payment_uuid, client_code, amount, payment_type]
+              properties:
+                payment_uuid:
+                  type: string
+                  format: uuid
+                  description: >
+                    ★ Identidad del pago, GENERADA POR LA APP. Hace el POST
+                    idempotente: un reintento tras perderse la respuesta
+                    devuelve el registro existente en vez de duplicar el dinero.
+                client_code:
+                  type: string
+                  description: El cliente que paga. Debe ser una parada de su ruta.
+                amount:
+                  type: number
+                  format: double
+                  description: El monto recibido. Debe ser > 0.
+                payment_type: { $ref: '#/components/schemas/PaymentType' }
+                check_number:
+                  type: string
+                  nullable: true
+                  description: OBLIGATORIO si payment_type es CHEQUE; ausente si CASH.
+                photo_base64:
+                  type: string
+                  nullable: true
+                  description: >
+                    La foto del cheque, en base64 sin prefijo data-uri, ya
+                    redimensionada por la app (~1024px, ~70%).
+                    OBLIGATORIA si CHEQUE; ausente si CASH.
+                note: { type: string, nullable: true }
+                occurred_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: Cuándo se recibió el dinero (hora real, no la de sync).
+      responses:
+        '201':
+          description: Pago registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '200':
+          description: >
+            Este payment_uuid YA fue procesado — devuelve el registro existente
+            sin duplicar.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '400':
+          description: >
+            Cliente que no es de su ruta; monto <= 0; CHEQUE sin número o sin
+            foto; CASH con número de cheque o foto; foto ilegible.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: El camión no está EN_RUTA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dispatch/payments/mine:
+    get:
+      tags: [payments]
+      summary: Los pagos que recogió el driver, con el total de su caja
+      description: >
+        ★ v0.16.0 — REQUIERE rol DRIVER.
+        Lo que lleva recogido en su ruta actual, con el total separado por CASH
+        y CHEQUE — al terminar trae ese dinero encima y necesita saber cuánto es.
+        Los ANULADOS aparecen marcados pero NO suman al total.
+        Sigue accesible con la ruta cerrada (para poder anular después).
+      responses:
+        '200':
+          description: Sus pagos y el total
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverPaymentSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /dispatch/payments/{payment_uuid}/void:
+    post:
+      tags: [payments]
+      summary: Anular un pago mal registrado
+      description: >
+        ★ v0.16.0 — REQUIERE rol DRIVER; el pago debe ser SUYO → 403.
+
+        ★ EL REGISTRO NO SE BORRA. Queda como anulado, con quién lo anuló,
+        cuándo y POR QUÉ. Un pago es dinero: nada desaparece, todo queda
+        auditable.
+
+        El MOTIVO es obligatorio — un pago anulado sin explicación es una
+        bandera roja que nadie puede resolver después.
+
+        Se puede anular EN CUALQUIER MOMENTO, incluso con la ruta ya cerrada:
+        el error suele notarse al cuadrar la caja en la bodega.
+
+        Anular dos veces el mismo pago → 200 (idempotente), sin cambiar el
+        motivo ni la hora del primer anulado.
+      parameters:
+        - name: payment_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: Por qué se anula. OBLIGATORIO.
+                occurred_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+      responses:
+        '200':
+          description: Pago anulado (o ya lo estaba)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '400':
+          description: Sin motivo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: El pago no es de este driver
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/payments:
+    get:
+      tags: [payments-admin]
+      summary: Pagos recibidos en ruta (dinero del DRIVER)
+      description: >
+        ★ v0.16.0 — REQUIERE ADMIN. El dinero que los drivers recogieron.
+        El admin lo aplica en SAP manualmente.
+        Incluye los ANULADOS (marcados, con su motivo) — el rastro importa.
+        No confundir con /admin/account-payments (v0.17.0), que son pagos del
+        vendedor ya aplicados a facturas específicas.
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Desde esta fecha (inclusive). Por defecto, hoy.
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Hasta esta fecha (inclusive). Por defecto, hoy.
+      responses:
+        '200':
+          description: Los pagos del período, con totales
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPaymentList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/payments/{payment_uuid}/photo:
+    get:
+      tags: [payments-admin]
+      summary: La foto del cheque
+      description: >
+        ★ v0.16.0 — REQUIERE ADMIN. Solo para pagos con CHEQUE.
+        404 si es CASH (no tiene foto).
+      parameters:
+        - name: payment_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: La imagen
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2058,9 +3445,248 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    # ★ v0.17.0 — AGREGADOS APROBADOR_PAGOS, APROBADOR_CREDITOS
     Role:
       type: string
-      enum: [VENDEDOR, ADMIN, BODEGUERO]
+      enum: [VENDEDOR, ADMIN, BODEGUERO, DRIVER, APROBADOR_PAGOS, APROBADOR_CREDITOS]
+
+    # ═══════════════ ★ NUEVO v0.17.0 — PAGOS DE CARTERA Y CRÉDITOS ═══════════════
+    ApprovalStatus:
+      type: string
+      enum: [PENDIENTE_APROBACION, APROBADO, RECHAZADO, ERROR_INTEGRACION]
+      description: >
+        ★ v0.17.0 — Estado compartido por el flujo de aprobación de
+        account-payments y credit-requests.
+        ★ v0.17.1 — Se agrega ERROR_INTEGRACION: el aprobador ya aprobó, pero
+        la escritura a SAP (IncomingPayments / CreditNotes) falló. Es un
+        estado terminal-reintentable: no vuelve a PENDIENTE_APROBACION ni
+        requiere nueva aprobación del usuario, solo reintentar la integración.
+
+    AccountPaymentMethod:
+      type: string
+      enum: [EFECTIVO, CHEQUE, TRANSFERENCIA, OTRO]
+      description: ★ v0.17.0 — Cómo pagó el cliente al vendedor (distinto de PaymentType del driver).
+
+    EvidencePhotoUpload:
+      type: object
+      required: [image_base64]
+      properties:
+        image_base64:
+          type: string
+          description: Imagen en base64 (JPEG/PNG). Se guarda a disco igual que retornos (4B).
+        client_code:
+          type: string
+          nullable: true
+          description: Opcional, solo para organizar la ruta de almacenamiento.
+
+    EvidencePhotoUploaded:
+      type: object
+      properties:
+        evidence_image_url:
+          type: string
+          description: >
+            Ruta relativa a usar tal cual en evidence_image_url de
+            account-payments/credit-requests. Es la misma ruta que sirve
+            GET /evidence-photos/{id} (p. ej. "/evidence-photos/3fa85f64-...") —
+            no es una URL externa ni absoluta.
+
+    InvoiceApplication:
+      type: object
+      description: Cuánto de un pago de cartera se aplica a UNA factura.
+      required: [invoice_doc_num, amount]
+      properties:
+        invoice_doc_num: { type: string, description: "DocNum de la factura (de vw_CxC)." }
+        amount: { type: number, format: double }
+
+    AccountPaymentCreate:
+      type: object
+      required: [payment_uuid, client_uuid, client_code, amount, method, payment_date]
+      properties:
+        payment_uuid:
+          type: string
+          format: uuid
+          description: Identidad del pago, generada por la app. Hace el POST idempotente.
+        client_uuid: { type: string, format: uuid }
+        client_code: { type: string }
+        amount: { type: number, format: double, minimum: 0.01 }
+        method: { $ref: '#/components/schemas/AccountPaymentMethod' }
+        payment_date: { type: string, format: date }
+        comments: { type: string, nullable: true }
+        evidence_image_url:
+          type: string
+          nullable: true
+          description: >
+            ★ v0.17.7 — OPCIONAL (antes obligatoria en v0.17.2-v0.17.6). Si se
+            adjunta, debe venir de POST /evidence-photos primero.
+        proposed_applications:
+          type: array
+          description: >
+            Imputación PROPUESTA por el vendedor (opcional). El aprobador
+            puede confirmarla tal cual o reemplazarla.
+          items: { $ref: '#/components/schemas/InvoiceApplication' }
+
+    AccountPaymentAccepted:
+      type: object
+      properties:
+        payment_uuid: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        received_at: { type: string, format: date-time }
+
+    PendingAccountPayment:
+      type: object
+      description: Un pago de cartera en la bandeja, con contexto del cliente.
+      properties:
+        payment_uuid: { type: string, format: uuid }
+        client_code: { type: string }
+        client_name: { type: string }
+        salesperson_code: { type: string }
+        amount: { type: number, format: double }
+        method: { $ref: '#/components/schemas/AccountPaymentMethod' }
+        payment_date: { type: string, format: date }
+        comments: { type: string, nullable: true }
+        evidence_image_url: { type: string, nullable: true }
+        proposed_applications:
+          type: array
+          items: { $ref: '#/components/schemas/InvoiceApplication' }
+        client_statement:
+          $ref: '#/components/schemas/ClientStatement'
+          description: Contexto completo para decidir sin salir de la bandeja.
+        received_at: { type: string, format: date-time }
+
+    AccountPaymentApproval:
+      type: object
+      required: [applications]
+      properties:
+        applications:
+          type: array
+          description: >
+            Imputación FINAL (confirmada o modificada). Si la suma es MENOR
+            al amount del pago, el sobrante queda como pago a cuenta sin
+            aplicar (no bloquea).
+          items: { $ref: '#/components/schemas/InvoiceApplication' }
+        note: { type: string, nullable: true }
+
+    AccountPaymentDetail:
+      type: object
+      properties:
+        payment_uuid: { type: string, format: uuid }
+        client_code: { type: string }
+        client_name: { type: string }
+        amount: { type: number, format: double }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        final_applications:
+          type: array
+          items: { $ref: '#/components/schemas/InvoiceApplication' }
+        unapplied_amount:
+          type: number
+          format: double
+          description: Sobrante sin aplicar a ninguna factura (pago a cuenta).
+        decided_by: { type: string, nullable: true }
+        decided_at: { type: string, format: date-time, nullable: true }
+        decision_note: { type: string, nullable: true }
+        sap_incoming_payment_doc_num:
+          type: string
+          nullable: true
+          description: DocNum en SAP tras integrar (NULL hasta aprobar).
+
+    CreditRequestReason:
+      type: string
+      enum: [DAMAGED, DOESNT_WANT_IT, MISTAKE, SHORT]
+
+    CreditRequestLine:
+      type: object
+      description: Solo para la modalidad CON ítems.
+      required: [item_code, quantity, reason]
+      properties:
+        item_code: { type: string }
+        quantity: { type: number, format: double }
+        reason: { $ref: '#/components/schemas/CreditRequestReason' }
+
+    CreditRequestCreate:
+      type: object
+      required: [request_uuid, client_uuid, client_code, reason]
+      properties:
+        request_uuid:
+          type: string
+          format: uuid
+          description: Identidad de la solicitud, generada por la app. Hace el POST idempotente.
+        client_uuid: { type: string, format: uuid }
+        client_code: { type: string }
+        invoice_doc_num:
+          type: string
+          nullable: true
+          description: >
+            OPCIONAL. Factura sobre la que aplica el ajuste, si aplica a una
+            específica. Un crédito general del cliente puede omitirla.
+        reason: { $ref: '#/components/schemas/CreditRequestReason' }
+        lines:
+          type: array
+          nullable: true
+          description: >
+            CON ítems: monto se calcula de estas líneas. Si se omite, es la
+            modalidad SIN ítems y `manual_amount` es requerido.
+          items: { $ref: '#/components/schemas/CreditRequestLine' }
+        manual_amount:
+          type: number
+          format: double
+          nullable: true
+          description: Requerido si `lines` se omite (modalidad sin ítems).
+        comments: { type: string, nullable: true }
+        evidence_image_url: { type: string, nullable: true }
+
+    CreditRequestAccepted:
+      type: object
+      properties:
+        request_uuid: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        received_at: { type: string, format: date-time }
+
+    PendingCreditRequest:
+      type: object
+      description: Una solicitud de crédito en la bandeja, con contexto del cliente.
+      properties:
+        request_uuid: { type: string, format: uuid }
+        client_code: { type: string }
+        client_name: { type: string }
+        salesperson_code: { type: string }
+        invoice_doc_num: { type: string, nullable: true }
+        reason: { $ref: '#/components/schemas/CreditRequestReason' }
+        lines:
+          type: array
+          nullable: true
+          items: { $ref: '#/components/schemas/CreditRequestLine' }
+        manual_amount: { type: number, format: double, nullable: true }
+        calculated_amount:
+          type: number
+          format: double
+          description: Monto final (calculado de lines, o manual_amount).
+        comments: { type: string, nullable: true }
+        evidence_image_url: { type: string, nullable: true }
+        client_statement:
+          $ref: '#/components/schemas/ClientStatement'
+          description: >
+            ★ v0.17.6. Mismo enriquecimiento que PendingAccountPayment —
+            contexto completo del cliente para decidir sin salir de la bandeja.
+        received_at: { type: string, format: date-time }
+
+    CreditRequestDetail:
+      type: object
+      properties:
+        request_uuid: { type: string, format: uuid }
+        client_code: { type: string }
+        client_name: { type: string }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        calculated_amount: { type: number, format: double }
+        gl_account_code:
+          type: string
+          nullable: true
+          description: >
+            Resuelto automáticamente por `reason` (config del middleware).
+            Solo aplica a la modalidad SIN ítems.
+        decided_by: { type: string, nullable: true }
+        decided_at: { type: string, format: date-time, nullable: true }
+        decision_note: { type: string, nullable: true }
+        sap_credit_note_doc_num: { type: string, nullable: true }
 
     OrderStatus:
       type: string
@@ -2079,9 +3705,6 @@ components:
           RETENIDA_CARTERA → APROBADA | RECHAZADA          (acción del admin)
           APROBADA         → (final por ahora)
           RECHAZADA        → (final)
-
-        (Estados futuros del diseño — NO implementar aún: EN_RUTA, EN_PICKING,
-         ALISTADA, FACTURADA, ENTREGADA, RETENIDA_DESCUENTO...)
 
     WeekDay:
       type: string
@@ -2598,6 +4221,35 @@ components:
         all_recorded:
           type: boolean
           description: TRUE si ya se registraron todos.
+        driver_name:
+          type: string
+          nullable: true
+          description: ★ v0.14.0 — El driver que está despachando, si lo hay.
+        route_started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: ★ v0.14.0 — Cuándo salió a ruta.
+        returned_items:
+          type: array
+          description: >
+            ★ v0.14.0 — Los RETORNADOS acumulados HASTA AHORA (lo que ya se sabe
+            que vuelve en el camión), para que el admin los vea llegar en vivo
+            sin esperar al cierre de la ruta. Mismo consolidado que RouteSummary.
+          items: { $ref: '#/components/schemas/ReturnedItem' }
+        not_delivered_orders:
+          type: array
+          description: >
+            ★ v0.14.0 — Los pedidos NO_ENTREGADOS. Su mercancía también vuelve
+            COMPLETA en el camión, pero NO aparece en returned_items (un pedido
+            no entregado no tiene motivos por ítem). El admin necesita ver ambas
+            cosas para saber todo lo que regresa.
+          items:
+            type: object
+            properties:
+              order_number: { type: string }
+              client_name: { type: string }
+              reason: { $ref: '#/components/schemas/OrderRejectionReason' }
         stops:
           type: array
           description: Las paradas en orden de entrega DIRECTO (como el manifiesto).
@@ -2611,9 +4263,511 @@ components:
                 type: array
                 items: { $ref: '#/components/schemas/DeliveryRecord' }
 
+    WorkloadBoard:
+      type: object
+      description: >
+        ★ v0.12.0 — El tablero de carga: qué falta despachar, por día y
+        shipping code.
+      properties:
+        generated_at: { type: string, format: date-time }
+        today:
+          type: string
+          description: >
+            El día de la semana de HOY (LUNES..DOMINGO). El cálculo del "próximo
+            día disponible" se hace desde aquí.
+        totals:
+          $ref: '#/components/schemas/WorkloadTotals'
+        columns:
+          type: array
+          description: >
+            Las columnas del tablero: LUNES a VIERNES, más SIN_DIA al final.
+            Siempre vienen las 6, aunque estén vacías.
+          items: { $ref: '#/components/schemas/WorkloadColumn'  }
+
+    WorkloadColumn:
+      type: object
+      description: Una columna del tablero (un día, o SIN_DIA).
+      properties:
+        day:
+          type: string
+          enum: [LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, SIN_DIA]
+          description: >
+            SIN_DIA agrupa lo que no cae en ningún día: pedidos sin shipping
+            code, shipping codes sin días configurados, o configurados solo
+            para sábado/domingo (que se ignoran).
+        totals:
+          $ref: '#/components/schemas/WorkloadTotals'
+        groups:
+          type: array
+          description: Los shipping codes que caen en este día.
+          items: { $ref: '#/components/schemas/WorkloadGroup' }
+
+    WorkloadGroup:
+      type: object
+      description: Un shipping code dentro de una columna, con sus sumatorias.
+      properties:
+        shipping_code:
+          type: integer
+          nullable: true
+          description: >
+            El U_RSAP_SHIPPING_CODE (es INTEGER en SAP, no string).
+            NULL para los pedidos sin shipping code (solo en SIN_DIA).
+        shipping_code_name:
+          type: string
+          nullable: true
+          description: El nombre de la zona (de la UDT RSAP_SHIPPING_CODE).
+        totals:
+          $ref: '#/components/schemas/WorkloadTotals'
+        orders:
+          type: array
+          description: Los pedidos de este grupo.
+          items: { $ref: '#/components/schemas/WorkloadOrder' }
+
+    WorkloadOrder:
+      type: object
+      properties:
+        order_uuid: { type: string, format: uuid }
+        order_number: { type: string }
+        client_code: { type: string }
+        client_name: { type: string }
+        total_units:
+          type: number
+          format: double
+          description: Suma de unidades del pedido.
+        total_amount: { type: number, format: double }
+        in_truck:
+          type: boolean
+          description: >
+            ★ Si el pedido YA está montado en un camión. FALSE = todavía hay que
+            armarlo — es lo accionable del tablero.
+        truck_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            ★ v0.12.0 — El id del camión donde va, si in_truck es true. NULL si
+            no está en ninguno. Necesario para navegar al camión desde el
+            tablero (el nombre NO es único — no sirve para identificarlo).
+        truck_name:
+          type: string
+          nullable: true
+          description: El camión donde va, si in_truck es true.
+        is_overdue:
+          type: boolean
+          description: >
+            ★ ATRASADO: el pedido ya existía cuando pasó su día de entrega y no
+            se despachó. Aparece en el próximo día disponible con esta marca.
+
+    WorkloadTotals:
+      type: object
+      description: Las sumatorias de un grupo, columna, o del tablero completo.
+      properties:
+        order_count: { type: integer }
+        total_units: { type: number, format: double }
+        total_amount: { type: number, format: double }
+        in_truck_count:
+          type: integer
+          description: Cuántos de esos pedidos YA van en un camión.
+        not_in_truck_count:
+          type: integer
+          description: ★ Cuántos NO están en ningún camión — lo que falta armar.
+        overdue_count:
+          type: integer
+          description: Cuántos vienen atrasados.
+
+    PickingBoard:
+      type: object
+      description: >
+        ★ v0.13.0 — El piso de la bodega: los camiones activos con el avance de
+        cada carril.
+      properties:
+        generated_at: { type: string, format: date-time }
+        active_count:
+          type: integer
+          description: Camiones en curso (ASIGNADO/EN_PICKING/EN_REPARTICION).
+        completed_today_count:
+          type: integer
+          description: Camiones que llegaron a ALISTADO hoy.
+        trucks:
+          type: array
+          items: { $ref: '#/components/schemas/PickingBoardTruck' }
+
+    PickingBoardTruck:
+      type: object
+      properties:
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/TruckStatus' }
+        order_count: { type: integer }
+        stop_count: { type: integer }
+        has_frozen:
+          type: boolean
+          description: Si el camión tiene carril FROZEN (ítems congelados).
+        alistado_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Cuándo quedó ALISTADO. NULL si sigue en curso.
+        lanes:
+          type: array
+          description: >
+            El avance de cada carril. Van a su propio ritmo — uno puede estar
+            repartiendo mientras el otro recolecta.
+          items: { $ref: '#/components/schemas/PickingBoardLane' }
+
+    PickingBoardLane:
+      type: object
+      description: El avance de UN carril, como lo ve el admin.
+      properties:
+        lane: { $ref: '#/components/schemas/PickingLane' }
+        status: { $ref: '#/components/schemas/LaneStatus' }
+        assigned_to: { type: string, nullable: true }
+        assigned_to_name:
+          type: string
+          nullable: true
+          description: El bodeguero que lo tiene. NULL si SIN_ASIGNAR.
+        collection_progress:
+          type: number
+          format: double
+          description: Fracción recogida de este carril (0..1).
+        distribution_progress:
+          type: number
+          format: double
+          description: >
+            Fracción repartida de este carril (0..1). 0 mientras no haya
+            empezado la repartición.
+        item_count:
+          type: integer
+          description: Cuántos ítems distintos tiene este carril.
+        shortages:
+          type: array
+          description: >
+            ★ Los faltantes registrados en este carril, CON DETALLE. Es lo único
+            sobre lo que el admin puede actuar mientras el bodeguero trabaja.
+          items: { $ref: '#/components/schemas/PickingBoardShortage' }
+
+    PickingBoardShortage:
+      type: object
+      properties:
+        item_code: { type: string }
+        item_name: { type: string }
+        required_quantity:
+          type: number
+          format: double
+          description: Cuánto se necesitaba.
+        collected_quantity:
+          type: number
+          format: double
+          description: Cuánto se logró recoger.
+        missing_quantity:
+          type: number
+          format: double
+          description: Cuánto faltó.
+        note:
+          type: string
+          nullable: true
+          description: La nota que dejó el bodeguero, si dejó alguna.
+
+    DriverRoute:
+      type: object
+      description: >
+        ★ v0.14.0 — TODO lo que el driver necesita para trabajar la ruta SIN
+        CONEXIÓN. Esta es la descarga que hace antes de salir.
+      properties:
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/TruckStatus' }
+        downloaded_at:
+          type: string
+          format: date-time
+          description: Cuándo se generó esta descarga.
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Cuándo el driver inició la ruta. NULL si no ha salido.
+        total_stops: { type: integer }
+        total_orders: { type: integer }
+        pending_orders:
+          type: integer
+          description: Cuántos pedidos siguen sin registrar.
+        stops:
+          type: array
+          description: >
+            Las paradas en orden de entrega DIRECTO (el que definió el admin).
+            ★ El driver puede reordenarlas EN SU VISTA, pero eso NO cambia este
+            orden — es una preferencia local del dispositivo.
+          items: { $ref: '#/components/schemas/DriverStop' }
+        item_catalog:
+          type: array
+          description: >
+            ★ v0.15.0 — El catálogo de ítems vendibles (~540), para que el driver
+            pueda buscar por código o nombre al registrar un RETORNO DE PRODUCTO
+            sin conexión. Un retorno es de facturas anteriores, así que el ítem
+            puede NO estar en el camión de hoy.
+          items:
+            type: object
+            properties:
+              item_code: { type: string }
+              item_name: { type: string }
+
+    DriverStop:
+      type: object
+      properties:
+        stop_number: { type: integer }
+        client_code: { type: string }
+        client_name: { type: string }
+        address: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        zip_code: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        orders:
+          type: array
+          items: { $ref: '#/components/schemas/DriverOrder' }
+
+    DriverOrder:
+      type: object
+      description: Un pedido a entregar, con sus líneas (para marcar ítem por ítem).
+      properties:
+        order_uuid: { type: string, format: uuid }
+        order_number: { type: string }
+        total_amount: { type: number, format: double }
+        total_units: { type: number, format: double }
+        pallet_labels:
+          type: array
+          items: { type: string }
+          description: En qué pallets viene (para que el driver lo ubique en el camión).
+        is_incomplete_delivery:
+          type: boolean
+          description: >
+            Si al pedido le faltó producto en el picking. El driver debe saberlo
+            ANTES de entregar — así no le sorprende un reclamo del cliente.
+        delivery_status:
+          allOf:
+            - $ref: '#/components/schemas/DeliveryStatus'
+          nullable: true
+          description: Su estado de entrega, si ya se registró.
+        lines:
+          type: array
+          description: Las líneas del pedido, para confirmar ítem por ítem.
+          items:
+            type: object
+            properties:
+              item_code: { type: string }
+              item_name: { type: string }
+              quantity:
+                type: number
+                format: double
+                description: Cuánto lleva el camión de este ítem para este pedido.
+
+    RouteSummary:
+      type: object
+      description: >
+        ★ v0.14.0 — El resumen al cerrar la ruta, incluida la lista de
+        RETORNADOS (lo que el driver trae de vuelta).
+      properties:
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time }
+        total_orders: { type: integer }
+        delivered_count: { type: integer }
+        partial_count: { type: integer }
+        not_delivered_count: { type: integer }
+        pending_count:
+          type: integer
+          description: >
+            Pedidos que quedaron sin registrar. NO se les fuerza un estado; el
+            admin los cierra desde el Dashboard si hace falta.
+        returned_items:
+          type: array
+          description: >
+            ★ RETORNADOS: todo lo que el cliente no recibió y vuelve en el
+            camión. Consolidado de todas las paradas.
+          items: { $ref: '#/components/schemas/ReturnedItem' }
+
+    ReturnedItem:
+      type: object
+      properties:
+        item_code: { type: string }
+        item_name: { type: string }
+        quantity:
+          type: number
+          format: double
+          description: Total de unidades que vuelven.
+        reason: { $ref: '#/components/schemas/ItemRejectionReason' }
+        order_number: { type: string }
+        client_name: { type: string }
+
+    ProductReturnReason:
+      type: string
+      enum: [DANADO, EXPIRADO, NO_LO_QUIERE]
+      description: >
+        ★ v0.15.0 — Por qué el cliente devuelve el producto.
+        Distinto de ItemRejectionReason (que es para lo que se rechaza al
+        RECIBIR la entrega de hoy): esto es mercancía de facturas anteriores.
+
+    ProductReturn:
+      type: object
+      description: >
+        ★ v0.15.0 — Un retorno de producto registrado por un driver en ruta.
+      properties:
+        return_id:
+          type: string
+          format: uuid
+          description: >
+            El `return_uuid` que generó la app. Es la identidad del retorno.
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        driver_username: { type: string }
+        driver_name: { type: string, nullable: true }
+        client_code: { type: string }
+        client_name: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ProductReturnItem' }
+        total_units:
+          type: number
+          format: double
+          description: Suma de las cantidades de todos los ítems.
+        has_photo:
+          type: boolean
+          description: >
+            Siempre true (la foto es obligatoria), pero se expone para que el
+            Dashboard sepa si puede pedirla.
+        photo_url:
+          type: string
+          nullable: true
+          description: >
+            La ruta para pedir la imagen — GET /admin/returns/{id}/photo.
+            La foto NO viaja en este schema.
+        note: { type: string, nullable: true }
+        client_reference:
+          type: string
+          nullable: true
+          description: Referencia que dio el cliente (factura, remisión). Texto libre.
+        occurred_at:
+          type: string
+          format: date-time
+          description: Cuándo ocurrió la visita (hora real, no la de sincronización).
+        recorded_at:
+          type: string
+          format: date-time
+          description: Cuándo llegó al servidor.
+
+    ProductReturnItem:
+      type: object
+      properties:
+        item_code: { type: string }
+        item_name: { type: string }
+        quantity: { type: number, format: double }
+        reason: { $ref: '#/components/schemas/ProductReturnReason' }
+
+    PaymentType:
+      type: string
+      enum: [CASH, CHEQUE]
+      description: >
+        ★ v0.16.0 — Cómo pagó el cliente al DRIVER en ruta.
+        CHEQUE exige número de cheque y FOTO; CASH no lleva ninguno de los dos.
+        No confundir con AccountPaymentMethod (v0.17.0).
+
+    Payment:
+      type: object
+      description: >
+        ★ v0.16.0 — Un pago recibido en ruta por el DRIVER. Registro
+        INMUTABLE: no se edita ni se borra; si hubo error se ANULA dejando el
+        rastro. No confundir con AccountPaymentDetail (v0.17.0).
+      properties:
+        payment_uuid:
+          type: string
+          format: uuid
+          description: El uuid que generó la app. Es la identidad del pago.
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        driver_username: { type: string }
+        driver_name: { type: string, nullable: true }
+        client_code: { type: string }
+        client_name: { type: string }
+        amount: { type: number, format: double }
+        payment_type: { $ref: '#/components/schemas/PaymentType' }
+        check_number:
+          type: string
+          nullable: true
+          description: Solo para CHEQUE.
+        has_photo:
+          type: boolean
+          description: TRUE para CHEQUE (la foto es obligatoria), FALSE para CASH.
+        photo_url:
+          type: string
+          nullable: true
+          description: >
+            Ruta para pedir la imagen — GET /admin/payments/{uuid}/photo.
+            NULL para CASH. La foto NO viaja en este schema.
+        note: { type: string, nullable: true }
+        occurred_at:
+          type: string
+          format: date-time
+          description: Cuándo se recibió el dinero (hora real de la visita).
+        recorded_at:
+          type: string
+          format: date-time
+          description: Cuándo llegó al servidor.
+        is_voided:
+          type: boolean
+          description: >
+            ★ Si el pago fue ANULADO. El registro sigue existiendo — el rastro
+            importa. Los anulados NO suman a los totales.
+        voided_at: { type: string, format: date-time, nullable: true }
+        voided_by:
+          type: string
+          nullable: true
+          description: Quién lo anuló.
+        void_reason:
+          type: string
+          nullable: true
+          description: >
+            Por qué se anuló. Obligatorio al anular — un pago anulado sin
+            explicación es una bandera roja que nadie puede resolver después.
+
+    PaymentTotals:
+      type: object
+      description: Totales de un conjunto de pagos del driver. Los ANULADOS no suman.
+      properties:
+        cash_total: { type: number, format: double }
+        cheque_total: { type: number, format: double }
+        grand_total: { type: number, format: double }
+        payment_count:
+          type: integer
+          description: Pagos válidos (sin contar los anulados).
+        voided_count: { type: integer }
+
+    DriverPaymentSummary:
+      type: object
+      description: >
+        ★ v0.16.0 — La caja del driver: lo que lleva recogido en su ruta.
+      properties:
+        truck_id: { type: string, format: uuid }
+        truck_name: { type: string, nullable: true }
+        totals: { $ref: '#/components/schemas/PaymentTotals' }
+        payments:
+          type: array
+          description: Sus pagos, incluidos los anulados (marcados).
+          items: { $ref: '#/components/schemas/Payment' }
+
+    AdminPaymentList:
+      type: object
+      description: ★ v0.16.0 — Los pagos de ruta que ve el admin, con totales.
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        totals: { $ref: '#/components/schemas/PaymentTotals' }
+        payments:
+          type: array
+          items: { $ref: '#/components/schemas/Payment' }
+
     TruckStatus:
       type: string
-      enum: [BORRADOR, CONFIRMADO, ASIGNADO, EN_PICKING, EN_REPARTICION, ALISTADO, CANCELADO]
+      enum: [BORRADOR, CONFIRMADO, ASIGNADO, EN_PICKING, EN_REPARTICION, ALISTADO, ASIGNADO_DRIVER, EN_RUTA, RUTA_CERRADA, CANCELADO]
       description: >
         Ciclo de vida del camión.
           BORRADOR    El admin lo está armando (agrega/quita órdenes libremente).
@@ -2622,6 +4776,9 @@ components:
           EN_PICKING  Recolección en curso (fase 1). SE CONGELA.
           EN_REPARTICION  ★ v0.8.0 — Recolección completa; repartiendo en pallets.
           ALISTADO    Picking terminado (repartición cerrada). Listo para manifiesto.
+          ASIGNADO_DRIVER ★ v0.14.0 — Asignado a un driver, aún no salió.
+          EN_RUTA         ★ v0.14.0 — El driver inició la ruta; está despachando.
+          RUTA_CERRADA    ★ v0.14.0 — El driver terminó la ruta.
           CANCELADO   Deshecho; sus órdenes vuelven a "sin asignar".
 
     TruckSummary:
@@ -2676,6 +4833,26 @@ components:
             ★ v0.10.0 — El avance de cada carril. Si has_frozen es false, solo
             trae el carril REGULAR.
           items: { $ref: '#/components/schemas/LaneProgress' }
+        driver_username:
+          type: string
+          nullable: true
+          description: >
+            ★ v0.14.0 — El driver que tiene este camión. NULL si no se ha
+            asignado.
+        driver_name:
+          type: string
+          nullable: true
+          description: ★ v0.14.0 — Nombre visible del driver.
+        route_started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: ★ v0.14.0 — Cuándo el driver inició la ruta.
+        route_finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: ★ v0.14.0 — Cuándo la cerró.
 
     TruckDetail:
       allOf:
@@ -2760,6 +4937,28 @@ components:
         credit:
           $ref: '#/components/schemas/ClientCredit'
           # ★ v0.4.0 — la app lo usa para ADVERTIR offline.
+        open_invoices:
+          type: array
+          description: >
+            ★ v0.17.5. Facturas abiertas del cliente (de vw_CxC), sincronizadas
+            offline para que el vendedor pueda proponer proposed_applications
+            en POST /account-payments sin conexión. Mismo principio que
+            `credit`: dato de la ÚLTIMA sincronización, puede estar
+            desactualizado — el aprobador ve el estado fresco en la bandeja
+            de aprobación antes de confirmar la imputación real.
+          items: { $ref: '#/components/schemas/OpenInvoiceSummary' }
+
+    OpenInvoiceSummary:
+      type: object
+      required: [invoice_doc_num, amount, invoice_date, due_date]
+      properties:
+        invoice_doc_num: { type: string, description: "DocNum de la factura (vw_CxC)." }
+        amount:
+          type: number
+          format: double
+          description: Saldo abierto de esa factura específica (no el total facturado).
+        invoice_date: { type: string, format: date }
+        due_date: { type: string, format: date }
 
     ClientCredit:
       type: object
@@ -2970,11 +5169,6 @@ components:
             - $ref: '#/components/schemas/HoldReason'
           nullable: true
         notes: { type: string }
-
-        # ── ★ v0.4.1: rastro de la decisión del admin ──
-        # Están en OrderSummary (no solo en OrderDetail) para que la GRILLA
-        # pueda mostrar el motivo del rechazo sin abrir el detalle.
-        # Se heredan en OrderDetail y HeldOrder vía allOf.
         decided_by:
           type: string
           nullable: true
@@ -2991,8 +5185,6 @@ components:
             Nota del aprobador, o MOTIVO del rechazo (obligatorio al rechazar).
             ★ El VENDEDOR lo verá: es lo que le permite explicarle al cliente
             por qué su pedido no procedió.
-
-        # ── ★ v0.5.0: shipping code (logística) y asignación a camión ──
         shipping_route:
           type: string
           nullable: true
@@ -3025,7 +5217,6 @@ components:
             lines:
               type: array
               items: { $ref: '#/components/schemas/OrderDetailLine' }
-            # decided_by / decided_at / decision_note se heredan de OrderSummary.
 
     OrderDetailLine:
       type: object
