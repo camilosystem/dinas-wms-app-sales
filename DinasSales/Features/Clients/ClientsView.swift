@@ -17,25 +17,19 @@ struct ClientsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Selector DEBAJO del buscador (el buscador vive en la barra de navegación).
-                // Segmented control a todo el ancho, separado con un fondo tenue para no competir.
-                Picker("Vista", selection: $grouping) {
-                    ForEach(ClientsGrouping.allCases) { Text($0.label).tag($0) }
+                // Buscador SIEMPRE visible EN EL CUERPO (no en la barra de navegación): así el
+                // banner offline lo empuja hacia abajo y nunca lo tapa. El toggle de vista va a
+                // la derecha como ícono compacto, sin robarle ancho al buscador.
+                HStack(spacing: 10) {
+                    searchField
+                    modeToggle
                 }
-                .pickerStyle(.segmented)
                 .padding(.horizontal)
-                .padding(.vertical, 8)
-                .background(Color.secondary.opacity(0.08))
+                .padding(.top, 8)
+                .padding(.bottom, 4)
 
                 if viewModel.clients.isEmpty {
-                    ContentUnavailableViewCompat(
-                        title: viewModel.searchText.isEmpty ? "Sin clientes" : "Sin resultados",
-                        message: viewModel.searchText.isEmpty
-                            ? "Desliza hacia abajo para sincronizar."
-                            : "Ningún cliente coincide con la búsqueda.",
-                        systemImage: "person.2"
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    emptyState
                 } else {
                     switch grouping {
                     case .byClient: flatList
@@ -44,10 +38,59 @@ struct ClientsView: View {
                 }
             }
             .navigationTitle("Clientes")
-            .searchable(text: $viewModel.searchText, prompt: "Código, nombre, ciudad o ruta")
             .refreshable { await sync() }
             .task { viewModel.reload() }
         }
+    }
+
+    /// Buscador explícito, siempre visible (mismo criterio que ClientPickerView).
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Código, nombre, ciudad o ruta", text: $viewModel.searchText)
+                .autocorrectionDisabled()
+            if !viewModel.searchText.isEmpty {
+                Button {
+                    viewModel.searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Toggle de vista de SOLO ÍCONO en la esquina: un botón que alterna Por Cliente ↔ Por
+    /// Ciudad. El ícono cambia según el modo activo (persona / edificios), relleno y en color
+    /// de acento → es obvio cuál está activo. No compite por ancho con el buscador.
+    private var modeToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                grouping = (grouping == .byClient) ? .byCity : .byClient
+            }
+        } label: {
+            Image(systemName: grouping.icon)
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                .foregroundStyle(.tint)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Cambiar vista de clientes")
+        .accessibilityValue(grouping.label)
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableViewCompat(
+            title: viewModel.searchText.isEmpty ? "Sin clientes" : "Sin resultados",
+            message: viewModel.searchText.isEmpty
+                ? "Desliza hacia abajo para sincronizar."
+                : "Ningún cliente coincide con la búsqueda.",
+            systemImage: "person.2"
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Vista "Por Cliente": lista plana (idéntica a la de siempre).
@@ -91,6 +134,8 @@ enum ClientsGrouping: String, CaseIterable, Identifiable {
     case byClient, byCity
     var id: String { rawValue }
     var label: String { self == .byClient ? "Por Cliente" : "Por Ciudad" }
+    /// Ícono del modo ACTIVO (relleno): persona para Por Cliente, edificios para Por Ciudad.
+    var icon: String { self == .byClient ? "person.crop.circle.fill" : "building.2.fill" }
 }
 
 /// Fila de cliente (mismo contenido en ambas vistas): nombre + badges, y código · ciudad.
