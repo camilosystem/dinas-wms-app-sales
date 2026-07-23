@@ -38,6 +38,12 @@ enum JSONCoding {
         iso8601WithFraction.string(from: date)
     }
 
+    /// Formatea una fecha como `format: date` del contrato (YYYY-MM-DD, UTC). Para campos
+    /// solo-fecha como `payment_date` que NO deben viajar con hora.
+    static func dateOnlyString(_ date: Date) -> String {
+        dateOnly.string(from: date)
+    }
+
     /// `ISO8601DateFormatter`, una vez configurado, es seguro para uso concurrente de
     /// solo-lectura (`date(from:)` / `string(from:)`). Se envuelve para declararlo Sendable.
     private struct ISO8601: @unchecked Sendable {
@@ -66,6 +72,7 @@ enum JSONCoding {
             formatter = f
         }
         func date(from string: String) -> Date? { formatter.date(from: string) }
+        func string(from date: Date) -> String { formatter.string(from: date) }
     }
     private static let dateOnly = DateOnly()
 }

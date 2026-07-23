@@ -30,12 +30,23 @@ protocol CreditAPI: Sendable {
     func fetchStatement(clientCode: String) async throws -> ClientStatement
 }
 
+/// Subida del bloque de cartera (★ v0.17.0, requiere token).
+protocol CarteraUploadAPI: Sendable {
+    /// `POST /evidence-photos`. Sube la foto (base64) y devuelve su URL. REQUIERE conexión;
+    /// sin ella no hay `evidence_image_url` y el envío con foto no puede completarse.
+    func uploadEvidencePhoto(imageBase64: String, clientCode: String?) async throws -> String
+    /// `POST /account-payments`. Idempotente por `payment_uuid`.
+    func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted
+    /// `POST /credit-requests`. Idempotente por `request_uuid`. `lines` solo en CON_ITEMS.
+    func postCreditRequest(_ request: CreditRequest, lines: [CreditRequestLine]) async throws -> CreditRequestAccepted
+}
+
 /// Cliente HTTP contra el middleware, según `dinas-wms-contracts/openapi.yaml`.
 ///
 /// El JWT se inyecta vía `tokenProvider` y se añade como `Authorization: Bearer` en
 /// todos los endpoints salvo `login` (público). Si falta un campo/endpoint en el
 /// contrato, no se inventa: se eleva al Arquitecto.
-struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI {
+struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI, CarteraUploadAPI {
     /// URL base del middleware (incluye el path base `/v1`). Ver `AppConfig`.
     var baseURL: URL?
     var session: URLSession
@@ -119,6 +130,31 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI {
     func fetchStatement(clientCode: String) async throws -> ClientStatement {
         let request = try makeRequest(path: "clients/\(clientCode)/statement", method: "GET")
         return try await send(request, decode: ClientStatement.self)
+    }
+
+    // MARK: - Cartera: subida (★ v0.17.0)
+
+    /// `POST /evidence-photos`. Devuelve la `evidence_image_url` para usar al crear el registro.
+    func uploadEvidencePhoto(imageBase64: String, clientCode: String?) async throws -> String {
+        let body = try JSONCoding.encoder.encode(
+            EvidencePhotoUpload(imageBase64: imageBase64, clientCode: clientCode))
+        let request = try makeRequest(path: "evidence-photos", method: "POST", body: body)
+        return try await send(request, decode: EvidencePhotoUploaded.self).evidenceImageURL
+    }
+
+    /// `POST /account-payments`. Idempotente por `payment_uuid`.
+    func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted {
+        let body = try JSONCoding.encoder.encode(AccountPaymentCreateDTO(payment))
+        let request = try makeRequest(path: "account-payments", method: "POST", body: body)
+        return try await send(request, decode: AccountPaymentAccepted.self)
+    }
+
+    /// `POST /credit-requests`. Idempotente por `request_uuid`.
+    func postCreditRequest(_ request: CreditRequest,
+                           lines: [CreditRequestLine]) async throws -> CreditRequestAccepted {
+        let body = try JSONCoding.encoder.encode(CreditRequestCreateDTO(request, lines: lines))
+        let httpRequest = try makeRequest(path: "credit-requests", method: "POST", body: body)
+        return try await send(httpRequest, decode: CreditRequestAccepted.self)
     }
 
     // MARK: - Infra HTTP
