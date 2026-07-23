@@ -5,6 +5,10 @@ struct ClientDetailView: View {
     @EnvironmentObject private var environment: AppEnvironment
     let client: Client
 
+    @State private var showReportPayment = false
+    @State private var resultMessage: String?
+    @State private var showResult = false
+
     var body: some View {
         List {
             if !client.active {
@@ -37,6 +41,11 @@ struct ClientDetailView: View {
                 } label: {
                     Label("Ver estado de cuenta", systemImage: "doc.text.magnifyingglass")
                 }
+                Button {
+                    showReportPayment = true
+                } label: {
+                    Label("Reportar Pago", systemImage: "dollarsign.circle")
+                }
             }
 
             Section("Ubicación") {
@@ -56,6 +65,17 @@ struct ClientDetailView: View {
         }
         .navigationTitle(client.name)
         .navigationBarTitleDisplayModeInlineCompat()
+        .sheet(isPresented: $showReportPayment) {
+            ReportPaymentView(client: client) { message in
+                resultMessage = message
+                showResult = true
+            }
+        }
+        .alert("Reportar pago", isPresented: $showResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(resultMessage ?? "")
+        }
     }
 
     private func row(_ title: String, _ value: String) -> some View {

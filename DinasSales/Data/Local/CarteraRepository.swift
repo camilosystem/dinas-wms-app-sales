@@ -16,15 +16,19 @@ struct CarteraRepository {
 
     // MARK: - Pagos de cartera
 
-    /// Encola un pago SIN foto (`queued`). Devuelve el registro creado (con su `payment_uuid`).
+    /// Encola un pago (`queued`). `evidenceImageURL` es nil en envíos sin foto; en los envíos
+    /// CON foto ya trae la URL (de `POST /evidence-photos`) para que el POST de creación la use
+    /// y, si falla, el `SyncEngine` lo reintente SIN volver a subir la foto. Devuelve el registro
+    /// con su `payment_uuid` (generado AL CREAR).
     @discardableResult
     func enqueuePayment(clientCode: String, method: AccountPaymentMethod,
                         amount: Double, paymentDate: Date, comments: String?,
-                        proposedApplications: [InvoiceApplication]) throws -> AccountPayment {
+                        proposedApplications: [InvoiceApplication],
+                        evidenceImageURL: String? = nil) throws -> AccountPayment {
         let payment = AccountPayment(
             paymentUUID: makeUUID(), clientCode: clientCode,
             method: method, amount: amount, paymentDate: paymentDate, comments: comments,
-            evidenceImageURL: nil, proposedApplications: proposedApplications,
+            evidenceImageURL: evidenceImageURL, proposedApplications: proposedApplications,
             syncStatus: .queued, createdAt: now(), syncedAt: nil)
         try database.dbQueue.write { try payment.insert($0) }
         return payment

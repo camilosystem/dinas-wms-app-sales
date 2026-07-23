@@ -10,6 +10,15 @@ enum AccountPaymentMethod: String, Codable, CaseIterable, Equatable {
     case cheque = "CHEQUE"
     case transferencia = "TRANSFERENCIA"
     case otro = "OTRO"
+
+    var label: String {
+        switch self {
+        case .efectivo: return "Efectivo"
+        case .cheque: return "Cheque"
+        case .transferencia: return "Transferencia"
+        case .otro: return "Otro"
+        }
+    }
 }
 
 /// Motivo del ajuste (`CreditRequestReason`). Catálogo cerrado. La cuenta G/L la resuelve el
