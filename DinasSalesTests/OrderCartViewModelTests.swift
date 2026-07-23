@@ -58,6 +58,26 @@ final class OrderCartViewModelTests: XCTestCase {
         XCTAssertEqual(vm.rows.first?.unitPrice, 8)
     }
 
+    func test_priceListPolicy_listasVisibles_nuncaLista1() {
+        // Catálogo general (sin cliente): SOLO Lista 3.
+        XCTAssertEqual(PriceListPolicy.visibleLists(authorized: []), [3])
+        // Cliente autorizado en 1 y 3 (sin 2): SOLO Lista 3 (la 1 nunca).
+        XCTAssertEqual(PriceListPolicy.visibleLists(authorized: [1, 3]), [3])
+        // Cliente con Lista 2 autorizada: Lista 2 + Lista 3 (nunca la 1).
+        XCTAssertEqual(PriceListPolicy.visibleLists(authorized: [2, 3]), [2, 3])
+        XCTAssertEqual(PriceListPolicy.visibleLists(authorized: [1, 2]), [2, 3])
+    }
+
+    func test_priceListPolicy_listaDeAgregado_L2SoloSiAutorizadaYdefault() {
+        // L2 autorizada Y es la default → se agrega con L2.
+        XCTAssertEqual(PriceListPolicy.addList(authorized: [2, 3], defaultList: 2), 2)
+        // L2 autorizada pero la default es otra → L3.
+        XCTAssertEqual(PriceListPolicy.addList(authorized: [2, 3], defaultList: 3), 3)
+        // Default 1 (o L2 no autorizada) → L3, nunca L1.
+        XCTAssertEqual(PriceListPolicy.addList(authorized: [1, 3], defaultList: 1), 3)
+        XCTAssertEqual(PriceListPolicy.addList(authorized: [3], defaultList: 2), 3)
+    }
+
     /// El stepper del picker fija la cantidad ABSOLUTA: crea la línea, la actualiza y en 0 la quita.
     func test_setQuantityItem_creaActualizaYen0Quita() throws {
         let db = try AppDatabase.makeInMemory()

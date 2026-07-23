@@ -82,8 +82,8 @@ private struct CatalogCell: View {
                 .font(.caption)
                 .foregroundStyle(item.available > 0 ? .green : .red)
 
-            // Precios de las 3 listas (el vendedor elige cuál al armar la orden).
-            Text("L1 \(MoneyFormat.string(item.priceList1)) · L2 \(MoneyFormat.string(item.priceList2)) · L3 \(MoneyFormat.string(item.priceList3))")
+            // Catálogo general (sin cliente): SOLO Lista 3 (nunca Lista 1 ni Lista 2).
+            Text("Lista 3: \(MoneyFormat.string(item.priceList3))")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

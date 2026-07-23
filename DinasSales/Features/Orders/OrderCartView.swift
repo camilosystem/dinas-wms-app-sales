@@ -15,15 +15,15 @@ struct OrderCartView: View {
     @State private var pendingHoldWarning: HoldWarning?
 
     init(order: Order, clientName: String, database: AppDatabase, onFinish: @escaping () -> Void) {
-        // Listas de precio del cliente (para elegir por línea, solo entre las autorizadas).
+        // Política de precios: solo Lista 3 (+ Lista 2 si está autorizada). Nunca Lista 1.
         let client = try? ClientsRepository(database: database).client(code: order.clientCode)
         let authorized = client?.authorizedPriceLists ?? []
-        let defaultList = client?.defaultPriceList ?? (authorized.first ?? 1)
+        let sapDefault = client?.defaultPriceList ?? 0
         _viewModel = StateObject(wrappedValue: OrderCartViewModel(
             order: order,
             clientName: clientName,
-            authorizedPriceLists: authorized,
-            defaultPriceList: defaultList,
+            authorizedPriceLists: PriceListPolicy.visibleLists(authorized: authorized),
+            defaultPriceList: PriceListPolicy.addList(authorized: authorized, defaultList: sapDefault),
             credit: client?.credit ?? .zero,
             orders: OrdersRepository(database: database),
             catalog: CatalogRepository(database: database)
@@ -120,7 +120,8 @@ struct OrderCartView: View {
         .sheet(isPresented: $showItemPicker) {
             ItemPickerView(
                 database: environment.database,
-                priceList: viewModel.defaultPriceList,
+                priceLists: viewModel.authorizedPriceLists,   // visibles: [3] o [2,3]
+                addList: viewModel.defaultPriceList,           // con la que se agrega
                 quantities: viewModel.quantitiesByItem,
                 onSetQuantity: { item, qty in viewModel.setQuantity(item: item, quantity: qty) }
             )

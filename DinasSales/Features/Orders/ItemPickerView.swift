@@ -12,8 +12,11 @@ struct ItemPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: CatalogViewModel
 
-    /// Lista de precio por defecto del cliente (se agrega con esa; el precio mostrado es de ella).
-    let priceList: Int
+    /// Listas de precio VISIBLES aquí: [3] o [2,3] (nunca la 1). Vienen ya filtradas por la
+    /// política según lo que el cliente tenga autorizado.
+    let priceLists: [Int]
+    /// Lista con la que se AGREGA (se marca en la celda/detalle). Regla `default_price_list`.
+    let addList: Int
     /// Cantidad absoluta del ítem en el carrito, por código (para el stepper y el badge).
     let onSetQuantity: (Item, Double) -> Void
 
@@ -26,12 +29,13 @@ struct ItemPickerView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 165), spacing: 12)]
 
-    init(database: AppDatabase, priceList: Int, quantities: [String: Double],
+    init(database: AppDatabase, priceLists: [Int], addList: Int, quantities: [String: Double],
          onSetQuantity: @escaping (Item, Double) -> Void) {
         _viewModel = StateObject(
             wrappedValue: CatalogViewModel(repository: CatalogRepository(database: database))
         )
-        self.priceList = priceList
+        self.priceLists = priceLists
+        self.addList = addList
         self.onSetQuantity = onSetQuantity
         _cartQty = State(initialValue: quantities)
     }
@@ -64,7 +68,8 @@ struct ItemPickerView: View {
             .sheet(item: $detailItem) { item in
                 ItemDetailSheet(
                     item: item,
-                    priceList: priceList,
+                    priceLists: priceLists,
+                    addList: addList,
                     inCartQuantity: qty(item),
                     onSetQuantity: { newQty in setQty(item, to: newQty) }
                 )
@@ -101,7 +106,7 @@ struct ItemPickerView: View {
                 ForEach(viewModel.items) { item in
                     ItemCell(
                         item: item,
-                        priceList: priceList,
+                        priceLists: priceLists,
                         inCart: qty(item),
                         onOpenDetail: { detailItem = item },
                         onIncrement: { setQty(item, to: qty(item) + 1) },
@@ -152,7 +157,7 @@ struct ItemPickerView: View {
 /// edita el carrito directamente (+/-), sin botón de confirmación aparte.
 private struct ItemCell: View {
     let item: Item
-    let priceList: Int
+    let priceLists: [Int]
     let inCart: Double
     let onOpenDetail: () -> Void
     let onIncrement: () -> Void
@@ -185,7 +190,10 @@ private struct ItemCell: View {
                     Text("Disp: \(item.available.formatted())")
                         .font(.caption)
                         .foregroundStyle(item.available > 0 ? .green : .red)
-                    Text(MoneyFormat.string(item.price(forList: priceList)))
+                    // Solo las listas visibles (L3 siempre; L2 si está autorizada). Nunca L1.
+                    Text(priceLists
+                        .map { "L\($0) \(MoneyFormat.string(item.price(forList: $0)))" }
+                        .joined(separator: " · "))
                         .font(.caption.weight(.semibold))
                 }
             }

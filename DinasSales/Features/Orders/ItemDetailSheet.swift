@@ -10,8 +10,10 @@ import SwiftUI
 /// sin rediseñar el modal.
 struct ItemDetailSheet: View {
     let item: Item
-    /// Lista de precio del cliente (se marca como "del cliente" y es con la que se agrega).
-    let priceList: Int
+    /// Listas de precio VISIBLES: [3] o [2,3] (nunca la 1). Ya filtradas por la política.
+    let priceLists: [Int]
+    /// Lista con la que se AGREGA (se marca "se agrega con esta").
+    let addList: Int
     let inCartQuantity: Double
     /// Fija la cantidad absoluta del ítem en el carrito (0 = quitar).
     let onSetQuantity: (Double) -> Void
@@ -20,10 +22,11 @@ struct ItemDetailSheet: View {
     /// Cantidad en el carrito (sembrada con lo que ya había); el stepper la edita en vivo.
     @State private var quantity: Int
 
-    init(item: Item, priceList: Int, inCartQuantity: Double,
+    init(item: Item, priceLists: [Int], addList: Int, inCartQuantity: Double,
          onSetQuantity: @escaping (Double) -> Void) {
         self.item = item
-        self.priceList = priceList
+        self.priceLists = priceLists
+        self.addList = addList
         self.inCartQuantity = inCartQuantity
         self.onSetQuantity = onSetQuantity
         _quantity = State(initialValue: Int(inCartQuantity))
@@ -75,13 +78,14 @@ struct ItemDetailSheet: View {
         }
     }
 
-    /// Precios de las 3 listas; marca la lista del cliente. $0 es válido y ordenable (muestra/promo).
+    /// Solo las listas VISIBLES (L3 siempre; L2 si autorizada). Marca la de agregado. Nunca L1.
     private var pricesBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Precios").font(.caption).foregroundStyle(.secondary)
-            priceRow(1, item.priceList1)
-            priceRow(2, item.priceList2)
-            priceRow(3, item.priceList3)
+            Text(priceLists.count > 1 ? "Precios" : "Precio")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(priceLists, id: \.self) { list in
+                priceRow(list, item.price(forList: list))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -92,8 +96,8 @@ struct ItemDetailSheet: View {
     private func priceRow(_ list: Int, _ price: Double) -> some View {
         HStack {
             Text("Lista \(list)").foregroundStyle(.secondary)
-            if list == priceList {
-                Text("del cliente").font(.caption2)
+            if list == addList {
+                Text("se agrega con esta").font(.caption2)
                     .padding(.horizontal, 6).padding(.vertical, 1)
                     .background(.tint.opacity(0.15), in: Capsule())
                     .foregroundStyle(.tint)

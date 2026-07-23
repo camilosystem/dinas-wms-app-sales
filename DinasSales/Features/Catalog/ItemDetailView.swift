@@ -20,11 +20,9 @@ struct ItemDetailView: View {
                 stat("Disponible", item.available.formatted(),
                      color: item.available > 0 ? .green : .red)
 
-                // Precios en las 3 listas (0 es válido y ordenable — muestra / promoción).
+                // Catálogo general (sin cliente): SOLO Lista 3 (nunca Lista 1 ni Lista 2).
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Precios").font(.caption).foregroundStyle(.secondary)
-                    priceRow("Lista 1", item.priceList1)
-                    priceRow("Lista 2", item.priceList2)
+                    Text("Precio").font(.caption).foregroundStyle(.secondary)
                     priceRow("Lista 3", item.priceList3)
                 }
 

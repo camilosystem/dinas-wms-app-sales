@@ -58,6 +58,24 @@ struct Item: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatabl
     }
 }
 
+/// Política de precios de la app de VENDEDOR (una sola fuente de verdad):
+/// - La **Lista 1** NUNCA se muestra ni se usa, en ningún contexto.
+/// - La **Lista 3** siempre está visible (lista pública, como el catálogo).
+/// - La **Lista 2** solo si el cliente la tiene autorizada (contexto con cliente).
+enum PriceListPolicy {
+    /// Listas de precio VISIBLES/usables. `authorized` vacío = catálogo general (sin cliente)
+    /// → solo Lista 3. Con cliente, se agrega la Lista 2 si está autorizada. Nunca la Lista 1.
+    static func visibleLists(authorized: [Int]) -> [Int] {
+        authorized.contains(2) ? [2, 3] : [3]
+    }
+
+    /// Lista con la que se AGREGA al carrito: Lista 2 si el cliente la tiene autorizada Y es su
+    /// lista por defecto (`default_price_list`); si no, Lista 3. Nunca Lista 1.
+    static func addList(authorized: [Int], defaultList: Int) -> Int {
+        (authorized.contains(2) && defaultList == 2) ? 2 : 3
+    }
+}
+
 // `active` NO está en el `required` del contrato: si el middleware lo omitiera, la
 // decodificación sintetizada (que lo exige) tumbaría el catálogo ENTERO. Se decodifica con
 // `decodeIfPresent` (default true: ausente → activo). Va en extensión para conservar el
