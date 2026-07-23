@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var showImporter = false
     @State private var resultMessage: String?
     @State private var showResult = false
+    @State private var problemCount = 0
 
     private var service: BackupService { BackupService(database: environment.database) }
 
@@ -21,6 +22,24 @@ struct SettingsView: View {
                 row("Nombre", auth.displayName ?? auth.username ?? "—")
                 row("Código de vendedor", auth.salespersonCode ?? "—")
                 row("Rol", auth.role ?? "—")
+            }
+
+            Section("Sincronización") {
+                NavigationLink {
+                    SyncProblemsView()
+                } label: {
+                    HStack {
+                        Label("Problemas de sincronización", systemImage: "exclamationmark.triangle")
+                        Spacer()
+                        if problemCount > 0 {
+                            Text("\(problemCount)")
+                                .font(.caption.weight(.bold))
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Color.red, in: Capsule())
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
             }
 
             Section {
@@ -42,6 +61,7 @@ struct SettingsView: View {
         }
         .navigationTitle("Ajustes")
         .navigationBarTitleDisplayModeInlineCompat()
+        .task { problemCount = SyncProblemsView.count(database: environment.database) }
         .sheet(item: $shareItem) { item in
             #if os(iOS)
             ShareSheet(items: [item.url])
