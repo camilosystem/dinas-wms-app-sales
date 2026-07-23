@@ -40,8 +40,12 @@ struct CatalogView: View {
                     emptyState
                 } else {
                     switch grouping {
-                    case .byProduct: productGrid
-                    case .byCategory: categoryGrid
+                    case .byProduct:
+                        productGrid
+                    case .byCategory:
+                        // Nivel 1: lista de categorías. Al buscar, se APLANA a los ítems que
+                        // hacen match cruzando categorías (buscar un producto no exige su categoría).
+                        if viewModel.searchText.isEmpty { categoryList } else { productGrid }
                     }
                 }
             }
@@ -93,28 +97,27 @@ struct CatalogView: View {
         }
     }
 
-    /// Vista "Por Categoría": UN SOLO `LazyVGrid` de 2 columnas con secciones nativas (la
-    /// categoría como encabezado que ocupa todo el ancho). Clave contra el congelamiento: NO se
-    /// anida `LazyVGrid` dentro de `LazyVStack` (eso anulaba la carga perezosa y colgaba el hilo
-    /// principal). Al buscar, solo aparecen las secciones con ítems que coinciden.
-    private var categoryGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 12, pinnedViews: [.sectionHeaders]) {
-                ForEach(viewModel.categorySections) { section in
-                    Section {
-                        ForEach(section.items) { item in
-                            cell(item)
-                        }
-                    } header: {
-                        Text(section.category)
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 6)
-                            .background(.regularMaterial)   // opaco al fijarse (pinned)
-                    }
+    /// Nivel 1 de "Por Categoría": una LISTA simple (no grid) de categorías. Muy liviana (~30
+    /// filas) → sin riesgo de congelamiento. Cada fila muestra la categoría y su conteo, y navega
+    /// al nivel 2 (grid de esa categoría). Alfabético; "Sin categoría" al final (ya viene así de
+    /// `categorySections`).
+    private var categoryList: some View {
+        List(viewModel.categorySections) { section in
+            NavigationLink {
+                CategoryItemsView(
+                    database: environment.database,
+                    categoryName: section.category,
+                    filter: section.isNoCategory ? .uncategorized : .named(section.category)
+                )
+            } label: {
+                HStack {
+                    Text(section.category)
+                    Spacer()
+                    Text("\(section.items.count)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
             }
-            .padding(.horizontal)
         }
     }
 
@@ -142,8 +145,9 @@ enum CatalogGrouping: String, CaseIterable, Identifiable {
     var icon: String { self == .byProduct ? "square.grid.2x2.fill" : "tag.fill" }
 }
 
-/// Celda de la grilla: imagen, código, nombre, disponible y comentarios.
-private struct CatalogCell: View {
+/// Celda de la grilla: imagen, código, nombre, disponible y precio (Lista 3). Reutilizable en el
+/// grid plano (nivel 1 / Por Producto) y en el grid de una categoría (nivel 2).
+struct CatalogCell: View {
     let item: Item
 
     var body: some View {

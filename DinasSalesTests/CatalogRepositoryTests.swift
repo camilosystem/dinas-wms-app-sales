@@ -106,6 +106,32 @@ final class CatalogRepositoryTests: XCTestCase {
         XCTAssertEqual(sections.map(\.category), ["Abarrotes"])
     }
 
+    @MainActor
+    func test_categoryFilter_restringeALaCategoria_yBuscaDentro() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db, [
+            item("A1", name: "Leche", category: "Lácteos"),
+            item("A2", name: "Queso", category: "Lácteos"),
+            item("B1", name: "Pan", category: "Panadería"),
+            item("C1", name: "Sal", category: nil),
+        ])
+        let repo = CatalogRepository(database: db)
+
+        let lacteos = CatalogViewModel(repository: repo, categoryFilter: .named("Lácteos"))
+        lacteos.reload()
+        XCTAssertEqual(Set(lacteos.items.map(\.itemCode)), ["A1", "A2"])
+        XCTAssertTrue(lacteos.categorySections.isEmpty, "en nivel 2 no se agrupa")
+
+        // La búsqueda dentro de la categoría filtra solo sus ítems.
+        lacteos.searchText = "queso"
+        XCTAssertEqual(lacteos.items.map(\.itemCode), ["A2"])
+
+        // "Sin categoría": solo los de category vacía/nula.
+        let sinCat = CatalogViewModel(repository: repo, categoryFilter: .uncategorized)
+        sinCat.reload()
+        XCTAssertEqual(sinCat.items.map(\.itemCode), ["C1"])
+    }
+
     func test_item_porCodigo() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db, [item("X-1", name: "Uno")])

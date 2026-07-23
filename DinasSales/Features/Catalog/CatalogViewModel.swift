@@ -8,6 +8,13 @@ struct CatalogSection: Identifiable, Equatable {
     var id: String { category }
 }
 
+/// Restringe el catálogo a UNA categoría (nivel 2 del drill-down). `.all` = catálogo completo.
+enum CatalogCategoryFilter: Equatable {
+    case all
+    case named(String)      // una categoría concreta (nombre ya normalizado)
+    case uncategorized      // "Sin categoría" (category vacía o nula)
+}
+
 /// Estado de la pantalla de catálogo. Lee de la base local (offline) vía repositorio.
 @MainActor
 final class CatalogViewModel: ObservableObject {
@@ -19,23 +26,40 @@ final class CatalogViewModel: ObservableObject {
     @Published private(set) var loadError = false
 
     private let repository: CatalogRepository
+    /// Si no es `.all`, la lista queda restringida a esa categoría (pantalla nivel 2).
+    private let categoryFilter: CatalogCategoryFilter
 
-    init(repository: CatalogRepository) {
+    init(repository: CatalogRepository, categoryFilter: CatalogCategoryFilter = .all) {
         self.repository = repository
+        self.categoryFilter = categoryFilter
     }
 
-    /// Carga (o recarga) la lista aplicando el texto de búsqueda actual.
-    /// Llamar en `onAppear` y después de sincronizar.
+    /// Carga (o recarga) la lista aplicando el texto de búsqueda actual (y el filtro de categoría
+    /// si lo hay). Todo el trabajo se hace aquí y se cachea; el `body` nunca recalcula.
     func reload() {
         do {
-            items = try repository.items(matching: searchText)
-            categorySections = Self.groupByCategory(items)
+            var result = try repository.items(matching: searchText)
+            switch categoryFilter {
+            case .all:
+                break
+            case .named(let name):
+                result = result.filter { Self.normalizedCategory($0) == name }
+            case .uncategorized:
+                result = result.filter { Self.normalizedCategory($0).isEmpty }
+            }
+            items = result
+            // Las secciones solo importan en el catálogo completo (nivel 1).
+            categorySections = (categoryFilter == .all) ? Self.groupByCategory(items) : []
             loadError = false
         } catch {
             items = []
             categorySections = []
             loadError = true
         }
+    }
+
+    private static func normalizedCategory(_ item: Item) -> String {
+        item.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     /// Agrupa ítems por categoría: categorías ordenadas alfabéticamente, ítems por nombre dentro
