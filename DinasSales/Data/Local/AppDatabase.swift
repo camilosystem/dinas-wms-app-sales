@@ -275,6 +275,53 @@ final class AppDatabase {
             try db.execute(sql: "DELETE FROM sync_state")
         }
 
+        // ★ v0.17.0 — COLA OFFLINE de cartera: pagos (account-payments) y solicitudes de crédito
+        // (credit-requests). Solo los envíos SIN foto viven aquí como `queued`; con foto es
+        // síncrono (nunca se encola). `payment_uuid`/`request_uuid` = clave de idempotencia.
+        migrator.registerMigration("v9_cola_cartera") { db in
+            try db.create(table: "account_payments") { t in
+                t.primaryKey("payment_uuid", .text)      // idempotencia (generado al crear)
+                t.column("client_uuid", .text).notNull() // ⚠️ requerido por contrato (origen TBD)
+                t.column("client_code", .text).notNull()
+                t.column("method", .text).notNull()
+                t.column("amount", .double).notNull()
+                t.column("payment_date", .datetime).notNull()
+                t.column("comments", .text)
+                t.column("evidence_image_url", .text)    // solo en envíos con foto (síncronos)
+                t.column("proposed_applications", .text).notNull().defaults(to: "[]")  // JSON
+                t.column("sync_status", .text).notNull() // queued | synced
+                t.column("created_at", .datetime).notNull()
+                t.column("synced_at", .datetime)
+            }
+
+            try db.create(table: "credit_requests") { t in
+                t.primaryKey("request_uuid", .text)
+                t.column("client_uuid", .text).notNull()
+                t.column("client_code", .text).notNull()
+                t.column("mode", .text).notNull()        // CON_ITEMS | SIN_ITEMS
+                t.column("reason", .text).notNull()
+                t.column("manual_amount", .double)       // SIN_ITEMS
+                t.column("invoice_doc_num", .text)       // opcional
+                t.column("comments", .text)
+                t.column("evidence_image_url", .text)
+                t.column("sync_status", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("synced_at", .datetime)
+            }
+
+            // Líneas de CON_ITEMS. `unit_price` NO se guarda (lo resuelve el middleware).
+            try db.create(table: "credit_request_lines") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("request_uuid", .text).notNull()
+                    .references("credit_requests", column: "request_uuid", onDelete: .cascade)
+                t.column("item_code", .text).notNull()
+                t.column("quantity", .double).notNull()
+                t.column("reason", .text).notNull()
+            }
+            try db.create(index: "idx_credit_lines_request",
+                          on: "credit_request_lines", columns: ["request_uuid"])
+        }
+
         return migrator
     }
 }
