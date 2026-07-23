@@ -10,21 +10,25 @@ struct AuthGate: View {
     @EnvironmentObject private var network: NetworkMonitor
 
     var body: some View {
-        Group {
-            switch auth.state {
-            case .unknown:
-                ProgressView()
-            case .signedOut:
-                LoginView()
-            case .signedIn:
-                RootView()
-                    .environmentObject(environment.pendingOrders)
-            }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // ★ El banner offline va en un VStack ARRIBA del contenido (no como `safeAreaInset`, que
+        // solapaba las barras de navegación y tapaba controles: engranaje/"Cerrar sesión" en Home,
+        // "Guardar/Confirmar" en el carrito, etc.). Así EMPUJA todo hacia abajo y nunca tapa nada.
+        // Fix en un solo lugar → cubre todas las pantallas, presentes y futuras.
+        VStack(spacing: 0) {
+            if !network.isOnline { OfflineBanner() }
+
             Group {
-                if !network.isOnline { OfflineBanner() }
+                switch auth.state {
+                case .unknown:
+                    ProgressView()
+                case .signedOut:
+                    LoginView()
+                case .signedIn:
+                    RootView()
+                        .environmentObject(environment.pendingOrders)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task { auth.restore() }
     }
