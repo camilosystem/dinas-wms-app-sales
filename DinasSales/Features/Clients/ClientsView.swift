@@ -62,24 +62,14 @@ struct ClientsView: View {
         .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    /// Toggle de vista de SOLO ÍCONO en la esquina: un botón que alterna Por Cliente ↔ Por
-    /// Ciudad. El ícono cambia según el modo activo (persona / edificios), relleno y en color
-    /// de acento → es obvio cuál está activo. No compite por ancho con el buscador.
+    /// Toggle de vista de SOLO ÍCONO en la esquina (componente compartido): alterna Por Cliente
+    /// ↔ Por Ciudad. El ícono cambia según el modo activo (persona / edificios).
     private var modeToggle: some View {
-        Button {
+        ViewModeIconToggle(systemImage: grouping.icon, modeName: grouping.label) {
             withAnimation(.easeInOut(duration: 0.15)) {
                 grouping = (grouping == .byClient) ? .byCity : .byClient
             }
-        } label: {
-            Image(systemName: grouping.icon)
-                .font(.title3)
-                .frame(width: 44, height: 44)
-                .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-                .foregroundStyle(.tint)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Cambiar vista de clientes")
-        .accessibilityValue(grouping.label)
     }
 
     private var emptyState: some View {

@@ -77,6 +77,35 @@ final class CatalogRepositoryTests: XCTestCase {
         XCTAssertEqual(try repo.items(matching: "%").map(\.itemCode), ["A"])
     }
 
+    @MainActor
+    func test_groupByCategory_alfabetico_itemsPorNombre_sinCategoriaAlFinal() {
+        let items = [
+            item("I1", name: "Zeta", category: "Bebidas"),
+            item("I2", name: "Alfa", category: "Bebidas"),
+            item("I3", name: "Beta", category: "Abarrotes"),
+            item("I4", name: "Gamma", category: nil),     // sin categoría
+            item("I5", name: "Delta", category: "  "),     // categoría en blanco → sin categoría
+        ]
+
+        let sections = CatalogViewModel.groupByCategory(items)
+
+        // Categorías alfabéticas, "Sin categoría" al final.
+        XCTAssertEqual(sections.map(\.category), ["Abarrotes", "Bebidas", "Sin categoría"])
+        XCTAssertTrue(sections.last!.isNoCategory)
+        // Dentro de Bebidas, por nombre.
+        XCTAssertEqual(sections[1].items.map(\.name), ["Alfa", "Zeta"])
+        // Nulo y en blanco caen en "Sin categoría".
+        XCTAssertEqual(Set(sections.last!.items.map(\.itemCode)), ["I4", "I5"])
+    }
+
+    /// Búsqueda + agrupación: una categoría sin resultados no genera sección (no se muestra vacía).
+    @MainActor
+    func test_groupByCategory_categoriaSinResultados_noGeneraSeccion() {
+        let filtrados = [item("I3", name: "Beta", category: "Abarrotes")]
+        let sections = CatalogViewModel.groupByCategory(filtrados)
+        XCTAssertEqual(sections.map(\.category), ["Abarrotes"])
+    }
+
     func test_item_porCodigo() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db, [item("X-1", name: "Uno")])
