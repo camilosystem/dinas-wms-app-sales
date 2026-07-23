@@ -18,7 +18,7 @@ final class CarteraQueueTests: XCTestCase {
         let repo = makeRepo(db, uuid: "pay-1")
 
         let payment = try repo.enqueuePayment(
-            clientUUID: "cli-uuid", clientCode: "C1", method: .efectivo, amount: 150,
+            clientCode: "C1", method: .efectivo, amount: 150,
             paymentDate: Date(timeIntervalSince1970: 0), comments: "abono",
             proposedApplications: [InvoiceApplication(invoiceDocNum: "F-1", amount: 150)])
 
@@ -36,7 +36,7 @@ final class CarteraQueueTests: XCTestCase {
         let db = try AppDatabase.makeInMemory()
         let repo = makeRepo(db)
         let payment = AccountPayment(
-            paymentUUID: "pay-foto", clientUUID: "cli", clientCode: "C1", method: .cheque,
+            paymentUUID: "pay-foto", clientCode: "C1", method: .cheque,
             amount: 90, paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
             evidenceImageURL: "https://mid/evidence/1.jpg", proposedApplications: [],
             syncStatus: .synced, createdAt: Date(timeIntervalSince1970: 0), syncedAt: nil)
@@ -52,7 +52,7 @@ final class CarteraQueueTests: XCTestCase {
     func test_markPaymentSynced_saleDeLaCola() throws {
         let db = try AppDatabase.makeInMemory()
         let repo = makeRepo(db, uuid: "pay-1")
-        _ = try repo.enqueuePayment(clientUUID: "c", clientCode: "C1", method: .efectivo,
+        _ = try repo.enqueuePayment(clientCode: "C1", method: .efectivo,
                                     amount: 10, paymentDate: Date(timeIntervalSince1970: 0),
                                     comments: nil, proposedApplications: [])
 
@@ -71,7 +71,7 @@ final class CarteraQueueTests: XCTestCase {
         let repo = makeRepo(db, uuid: "req-1")
 
         let request = try repo.enqueueCreditRequest(
-            clientUUID: "cli", clientCode: "C1", mode: .conItems, reason: .damaged,
+            clientCode: "C1", mode: .conItems, reason: .damaged,
             manualAmount: nil, invoiceDocNum: "F-9", comments: nil,
             lines: [CreditRequestLineInput(itemCode: "I1", quantity: 2, reason: .damaged),
                     CreditRequestLineInput(itemCode: "I2", quantity: 1, reason: .short)])
@@ -95,7 +95,7 @@ final class CarteraQueueTests: XCTestCase {
         let repo = makeRepo(db, uuid: "req-2")
 
         let request = try repo.enqueueCreditRequest(
-            clientUUID: "cli", clientCode: "C1", mode: .sinItems, reason: .mistake,
+            clientCode: "C1", mode: .sinItems, reason: .mistake,
             manualAmount: 320.50, invoiceDocNum: nil, comments: "ajuste manual", lines: [])
 
         XCTAssertEqual(request.mode, .sinItems)

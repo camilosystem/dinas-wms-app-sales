@@ -18,11 +18,11 @@ struct CarteraRepository {
 
     /// Encola un pago SIN foto (`queued`). Devuelve el registro creado (con su `payment_uuid`).
     @discardableResult
-    func enqueuePayment(clientUUID: String, clientCode: String, method: AccountPaymentMethod,
+    func enqueuePayment(clientCode: String, method: AccountPaymentMethod,
                         amount: Double, paymentDate: Date, comments: String?,
                         proposedApplications: [InvoiceApplication]) throws -> AccountPayment {
         let payment = AccountPayment(
-            paymentUUID: makeUUID(), clientUUID: clientUUID, clientCode: clientCode,
+            paymentUUID: makeUUID(), clientCode: clientCode,
             method: method, amount: amount, paymentDate: paymentDate, comments: comments,
             evidenceImageURL: nil, proposedApplications: proposedApplications,
             syncStatus: .queued, createdAt: now(), syncedAt: nil)
@@ -64,12 +64,12 @@ struct CarteraRepository {
 
     /// Encola una solicitud SIN foto (`queued`). `lines` solo para CON_ITEMS (vacío en SIN_ITEMS).
     @discardableResult
-    func enqueueCreditRequest(clientUUID: String, clientCode: String, mode: CreditRequestMode,
+    func enqueueCreditRequest(clientCode: String, mode: CreditRequestMode,
                               reason: CreditRequestReason, manualAmount: Double?,
                               invoiceDocNum: String?, comments: String?,
                               lines: [CreditRequestLineInput]) throws -> CreditRequest {
         let request = CreditRequest(
-            requestUUID: makeUUID(), clientUUID: clientUUID, clientCode: clientCode, mode: mode,
+            requestUUID: makeUUID(), clientCode: clientCode, mode: mode,
             reason: reason, manualAmount: manualAmount, invoiceDocNum: invoiceDocNum,
             comments: comments, evidenceImageURL: nil, syncStatus: .queued,
             createdAt: now(), syncedAt: nil)

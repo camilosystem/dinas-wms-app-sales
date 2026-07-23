@@ -52,14 +52,10 @@ struct InvoiceApplication: Codable, Equatable {
 
 /// Un pago de cartera reportado por el vendedor (`account-payments`, ★ v0.17.0). Registro LOCAL:
 /// `payment_uuid` se genera AL CREAR (no al subir) para que la idempotencia funcione aunque el
-/// registro pase tiempo en la cola. `sync_status` distingue en-cola vs ya-enviado.
-///
-/// ⚠️ `client_uuid`: el contrato lo exige, pero NO hay fuente local (el `Client`/`GET /sync/clients`
-/// no trae un uuid de cliente). Se guarda el campo; su ORIGEN queda pendiente de resolver con el
-/// Arquitecto antes de armar el POST (ver reporte). NO se inventa un valor aquí.
+/// registro pase tiempo en la cola. `sync_status` distingue en-cola vs ya-enviado. El cliente se
+/// identifica solo por `client_code` (v0.17.8 quitó `client_uuid`, que no aplicaba a clientes).
 struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
     var paymentUUID: String            // PK; idempotencia (generado al crear)
-    var clientUUID: String             // ⚠️ requerido por el contrato, sin fuente local aún
     var clientCode: String
     var method: AccountPaymentMethod
     var amount: Double
@@ -78,7 +74,6 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
 
     enum CodingKeys: String, CodingKey {
         case paymentUUID = "payment_uuid"
-        case clientUUID = "client_uuid"
         case clientCode = "client_code"
         case method, amount, comments
         case paymentDate = "payment_date"
@@ -94,11 +89,10 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
 
 /// Una solicitud de crédito (`credit-requests`, ★ v0.17.0). `request_uuid` generado al crear.
 /// CON_ITEMS guarda además sus líneas (`CreditRequestLine`); el `unit_price` NO se calcula ni se
-/// guarda — lo resuelve el middleware al aprobar (último precio facturado). Mismo `client_uuid`
-/// pendiente que `AccountPayment`.
+/// guarda — lo resuelve el middleware al aprobar (último precio facturado). El cliente se
+/// identifica solo por `client_code`.
 struct CreditRequest: Codable, FetchableRecord, PersistableRecord, Identifiable, Equatable {
     var requestUUID: String            // PK; idempotencia
-    var clientUUID: String             // ⚠️ requerido por el contrato, sin fuente local aún
     var clientCode: String
     var mode: CreditRequestMode
     var reason: CreditRequestReason    // motivo (encabezado); obligatorio en ambas modalidades
@@ -115,7 +109,6 @@ struct CreditRequest: Codable, FetchableRecord, PersistableRecord, Identifiable,
 
     enum CodingKeys: String, CodingKey {
         case requestUUID = "request_uuid"
-        case clientUUID = "client_uuid"
         case clientCode = "client_code"
         case mode, reason, comments
         case manualAmount = "manual_amount"

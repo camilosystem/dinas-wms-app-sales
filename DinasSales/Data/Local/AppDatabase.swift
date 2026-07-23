@@ -281,7 +281,6 @@ final class AppDatabase {
         migrator.registerMigration("v9_cola_cartera") { db in
             try db.create(table: "account_payments") { t in
                 t.primaryKey("payment_uuid", .text)      // idempotencia (generado al crear)
-                t.column("client_uuid", .text).notNull() // ⚠️ requerido por contrato (origen TBD)
                 t.column("client_code", .text).notNull()
                 t.column("method", .text).notNull()
                 t.column("amount", .double).notNull()
@@ -296,7 +295,6 @@ final class AppDatabase {
 
             try db.create(table: "credit_requests") { t in
                 t.primaryKey("request_uuid", .text)
-                t.column("client_uuid", .text).notNull()
                 t.column("client_code", .text).notNull()
                 t.column("mode", .text).notNull()        // CON_ITEMS | SIN_ITEMS
                 t.column("reason", .text).notNull()
