@@ -18,6 +18,7 @@ struct CategoryItemsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            categoryHeader
             searchField
             if viewModel.items.isEmpty {
                 ContentUnavailableViewCompat(
@@ -45,6 +46,23 @@ struct CategoryItemsView: View {
         .navigationTitle(categoryName)
         .navigationBarTitleDisplayModeInlineCompat()
         .task { viewModel.reload() }
+    }
+
+    /// Contexto de la vista: nombre de la categoría en tamaño mediano (title3) + una pista discreta
+    /// de que se puede deslizar hacia la derecha para volver. No compite con el grid (color
+    /// secundario, texto pequeño) ni reemplaza el título de la barra de navegación.
+    private var categoryHeader: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(categoryName)
+                .font(.title3.weight(.semibold))
+                .lineLimit(1)
+            Label("Desliza para volver", systemImage: "chevron.left")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal)
+        .padding(.top, 6)
     }
 
     /// Buscador explícito, siempre visible (mismo criterio que el resto de la app).
