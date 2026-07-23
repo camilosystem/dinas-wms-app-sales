@@ -306,6 +306,21 @@ struct OrdersRepository {
         }
     }
 
+    /// Filtra summaries a UN SOLO día por `taken_at` (cuándo el vendedor tomó la orden, no
+    /// cuándo llegó al servidor). Los borradores (sin `taken_at`) son trabajo en curso: se
+    /// incluyen solo cuando el día seleccionado es HOY, para no perderlos en el histórico.
+    /// Función pura (recibe `today`) → determinista y testeable.
+    static func summaries(_ all: [OrderSummary], takenOn day: Date, today: Date,
+                          calendar: Calendar = .current) -> [OrderSummary] {
+        let dayIsToday = calendar.isDate(day, inSameDayAs: today)
+        return all.filter { summary in
+            if let takenAt = summary.order.takenAt {
+                return calendar.isDate(takenAt, inSameDayAs: day)
+            }
+            return dayIsToday
+        }
+    }
+
     // MARK: - Totales
 
     /// Total de una línea: cantidad × precio × (1 − descuento%).

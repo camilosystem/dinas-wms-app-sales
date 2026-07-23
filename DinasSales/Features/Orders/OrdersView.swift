@@ -10,6 +10,8 @@ struct OrdersView: View {
     @State private var showClientPicker = false
     @State private var loadError = false
     @State private var orderToDiscard: OrderSummary?
+    /// Día que se está viendo (filtro por `taken_at`). Por defecto HOY.
+    @State private var selectedDay = Date()
 
     private var ordersRepo: OrdersRepository { OrdersRepository(database: environment.database) }
     private var clientsRepo: ClientsRepository { ClientsRepository(database: environment.database) }
@@ -19,19 +21,16 @@ struct OrdersView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if summaries.isEmpty {
-                    ContentUnavailableViewCompat(
-                        title: "Sin órdenes",
-                        message: "Crea una orden nueva con el botón +.",
-                        systemImage: "cart"
-                    )
+            VStack(spacing: 0) {
+                dateFilterBar
+                // Banners GLOBALES (no por día): una rechazada o un vencido no deben ocultarse
+                // por estar viendo otro día — son alertas de atención.
+                if rejectedCount > 0 { rejectedBanner }
+                if overdueCount > 0 { overdueBanner }
+                if filteredSummaries.isEmpty {
+                    emptyForDay
                 } else {
-                    VStack(spacing: 0) {
-                        if rejectedCount > 0 { rejectedBanner }
-                        if overdueCount > 0 { overdueBanner }
-                        list
-                    }
+                    list
                 }
             }
             .navigationTitle("Órdenes")
@@ -101,9 +100,66 @@ struct OrdersView: View {
         .background(Color.red.opacity(0.1))
     }
 
+    // MARK: - Filtro por día
+
+    /// Órdenes del día seleccionado (por `taken_at`). Los borradores se ven bajo HOY.
+    private var filteredSummaries: [OrderSummary] {
+        OrdersRepository.summaries(summaries, takenOn: selectedDay, today: Date())
+    }
+
+    private var isToday: Bool { Calendar.current.isDateInToday(selectedDay) }
+
+    /// Barra de fecha: flechas ← → para moverse día por día + date picker nativo para saltar a
+    /// cualquier día anterior. Sin futuro (no se toman órdenes de días que no han pasado).
+    private var dateFilterBar: some View {
+        HStack(spacing: 12) {
+            Button { shiftDay(by: -1) } label: {
+                Image(systemName: "chevron.left").font(.headline).frame(width: 34, height: 30)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+            DatePicker("", selection: $selectedDay, in: ...Date(), displayedComponents: .date)
+                .labelsHidden()
+            if !isToday {
+                Button("Hoy") { selectedDay = Date() }
+                    .font(.callout.weight(.semibold))
+            }
+            Spacer()
+
+            Button { shiftDay(by: 1) } label: {
+                Image(systemName: "chevron.right").font(.headline).frame(width: 34, height: 30)
+            }
+            .buttonStyle(.plain)
+            .disabled(isToday)   // no hay días futuros
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.08))
+    }
+
+    /// Estado vacío CLARO por día (no una lista en blanco sin contexto).
+    private var emptyForDay: some View {
+        ContentUnavailableViewCompat(
+            title: isToday ? "Sin órdenes hoy" : "Sin órdenes este día",
+            message: isToday
+                ? "No tomaste órdenes hoy. Crea una nueva con el botón de abajo."
+                : "No tomaste órdenes este día.",
+            systemImage: "calendar"
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Mueve el día seleccionado, sin pasar de hoy.
+    private func shiftDay(by days: Int) {
+        guard let moved = Calendar.current.date(byAdding: .day, value: days, to: selectedDay)
+        else { return }
+        selectedDay = min(moved, Date())
+    }
+
     private var list: some View {
         List {
-            ForEach(summaries) { summary in
+            ForEach(filteredSummaries) { summary in
                 NavigationLink(value: route(for: summary.order)) {
                     OrderRow(summary: summary)
                 }

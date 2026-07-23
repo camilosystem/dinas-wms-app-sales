@@ -357,4 +357,42 @@ final class OrdersRepositoryTests: XCTestCase {
         XCTAssertEqual(order?.status, .draft)
         XCTAssertNil(order?.rejectionReason)
     }
+
+    // MARK: - Filtro por día (taken_at)
+
+    private func summary(uuid: String, taken: Date?) -> OrderSummary {
+        OrderSummary(
+            order: Order(clientUUID: uuid, clientCode: "C1",
+                         status: taken == nil ? .draft : .synced, notes: nil,
+                         createdAt: Date(timeIntervalSince1970: 0), takenAt: taken, syncedAt: nil,
+                         orderNumber: nil, rejectionReason: nil, creditVerdict: nil,
+                         holdReason: nil, decisionNote: nil, decidedAt: nil,
+                         deliveryStatus: nil, deliveryReason: nil, deliveredAt: nil),
+            clientName: "Tienda", itemCount: 0, total: 0, isOverdue: false)
+    }
+
+    func test_summaries_filtraPorDiaDeTakenAt_yBorradoresSoloHoy() {
+        let cal = Calendar(identifier: .gregorian)
+        let today = Date(timeIntervalSince1970: 1_700_000_000)          // un día cualquiera
+        let yesterday = today.addingTimeInterval(-24 * 3600)
+        let twoDaysAgo = today.addingTimeInterval(-48 * 3600)
+
+        let all = [
+            summary(uuid: "hoy", taken: today),
+            summary(uuid: "ayer", taken: yesterday),
+            summary(uuid: "borrador", taken: nil),
+        ]
+
+        // HOY: la tomada hoy + el borrador (trabajo en curso). NO la de ayer.
+        let hoy = OrdersRepository.summaries(all, takenOn: today, today: today, calendar: cal)
+        XCTAssertEqual(Set(hoy.map(\.id)), ["hoy", "borrador"])
+
+        // AYER: solo la tomada ayer. El borrador NO aparece en el histórico.
+        let deAyer = OrdersRepository.summaries(all, takenOn: yesterday, today: today, calendar: cal)
+        XCTAssertEqual(deAyer.map(\.id), ["ayer"])
+
+        // Un día sin órdenes: vacío.
+        let sinNada = OrdersRepository.summaries(all, takenOn: twoDaysAgo, today: today, calendar: cal)
+        XCTAssertTrue(sinNada.isEmpty)
+    }
 }
