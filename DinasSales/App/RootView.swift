@@ -92,8 +92,9 @@ struct HomeView: View {
             .padding()
             .navigationTitle("Home")
             .toolbar {
-                // Engranaje → Ajustes (cuenta + backup/restauración del historial).
-                ToolbarItem(placement: .primaryAction) {
+                // Engranaje a la IZQUIERDA (Ajustes), separado de "Cerrar sesión" a la derecha,
+                // para que no se confundan como un solo control.
+                ToolbarItem(placement: .cancellationAction) {
                     NavigationLink { SettingsView() } label: {
                         Image(systemName: "gearshape")
                     }
