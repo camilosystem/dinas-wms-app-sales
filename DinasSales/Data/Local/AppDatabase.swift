@@ -264,6 +264,17 @@ final class AppDatabase {
             }
         }
 
+        // ★ v0.17.5 — Facturas abiertas por cliente (base para proponer imputaciones al reportar
+        // un pago de cartera). GRDB persiste [OpenInvoiceSummary] como JSON en esta columna.
+        migrator.registerMigration("v8_open_invoices") { db in
+            try db.alter(table: "clients") { t in
+                t.add(column: "open_invoices", .text).notNull().defaults(to: "[]")
+            }
+            // El esquema de clientes cambió → forzar bajada COMPLETA para poblar el nuevo campo
+            // (mismo criterio que v5_cartera).
+            try db.execute(sql: "DELETE FROM sync_state")
+        }
+
         return migrator
     }
 }

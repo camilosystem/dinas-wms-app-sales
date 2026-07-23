@@ -119,6 +119,9 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
     /// Situación de cartera (★ v0.4.0). GRDB la persiste como JSON en la columna `credit`.
     /// La app la usa para ADVERTIR offline; el middleware decide con datos frescos.
     var credit: ClientCredit = .zero
+    /// Facturas abiertas del cliente (★ v0.17.5). GRDB la persiste como JSON en la columna
+    /// `open_invoices`. Base para proponer imputaciones al reportar un pago de cartera.
+    var openInvoices: [OpenInvoiceSummary] = []
 
     var id: String { clientCode }
 
@@ -133,6 +136,7 @@ struct Client: Codable, FetchableRecord, PersistableRecord, Identifiable, Equata
         case authorizedPriceLists = "authorized_price_lists"
         case active
         case credit
+        case openInvoices = "open_invoices"
     }
 }
 
@@ -183,6 +187,26 @@ struct ClientCredit: Codable, Equatable {
     )
 }
 
+// MARK: - OpenInvoiceSummary (facturas abiertas del cliente, ★ v0.17.5)
+
+/// Factura abierta del cliente (schema `OpenInvoiceSummary`). Se sincroniza offline dentro de
+/// `Client.open_invoices` para que el vendedor pueda proponer imputaciones (`proposed_applications`)
+/// al reportar un pago de cartera SIN conexión. Como `credit`: dato de la ÚLTIMA sincronización,
+/// puede estar desactualizado — el aprobador ve el estado fresco al confirmar la imputación real.
+struct OpenInvoiceSummary: Codable, Equatable {
+    var invoiceDocNum: String    // DocNum de la factura (vw_CxC)
+    var amount: Double           // saldo ABIERTO de esa factura (no el total facturado)
+    var invoiceDate: Date
+    var dueDate: Date
+
+    enum CodingKeys: String, CodingKey {
+        case invoiceDocNum = "invoice_doc_num"
+        case amount
+        case invoiceDate = "invoice_date"
+        case dueDate = "due_date"
+    }
+}
+
 // Campos opcionales del contrato: los no-requeridos (`overdue_*`, `has_overdue`,
 // `grace_days`) se decodifican con default 0/false para tolerar respuestas mínimas.
 // Va en extensión para conservar el init por miembros (usado en tests y al construir).
@@ -218,6 +242,8 @@ extension Client {
         authorizedPriceLists = try c.decode([Int].self, forKey: .authorizedPriceLists)
         active = try c.decodeIfPresent(Bool.self, forKey: .active) ?? true
         credit = try c.decode(ClientCredit.self, forKey: .credit)
+        // Opcional en el contrato (ausente en clientes sin facturas abiertas) → [] tolerante.
+        openInvoices = try c.decodeIfPresent([OpenInvoiceSummary].self, forKey: .openInvoices) ?? []
     }
 }
 
