@@ -28,6 +28,15 @@ enum CreditRequestReason: String, Codable, CaseIterable, Equatable {
     case doesntWantIt = "DOESNT_WANT_IT"
     case mistake = "MISTAKE"
     case short = "SHORT"
+
+    var label: String {
+        switch self {
+        case .damaged: return "Producto dañado"
+        case .doesntWantIt: return "No lo quiere"
+        case .mistake: return "Error en el pedido"
+        case .short: return "Faltante"
+        }
+    }
 }
 
 /// Modalidad de la solicitud. El contrato la infiere por la presencia de `lines`; localmente la

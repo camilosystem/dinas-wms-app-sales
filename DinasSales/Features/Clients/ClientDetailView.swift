@@ -6,6 +6,7 @@ struct ClientDetailView: View {
     let client: Client
 
     @State private var showReportPayment = false
+    @State private var showRequestCredit = false
     @State private var resultMessage: String?
     @State private var showResult = false
 
@@ -46,6 +47,11 @@ struct ClientDetailView: View {
                 } label: {
                     Label("Reportar Pago", systemImage: "dollarsign.circle")
                 }
+                Button {
+                    showRequestCredit = true
+                } label: {
+                    Label("Solicitar Crédito", systemImage: "arrow.uturn.backward.circle")
+                }
             }
 
             Section("Ubicación") {
@@ -71,7 +77,13 @@ struct ClientDetailView: View {
                 showResult = true
             }
         }
-        .alert("Reportar pago", isPresented: $showResult) {
+        .sheet(isPresented: $showRequestCredit) {
+            RequestCreditView(client: client) { message in
+                resultMessage = message
+                showResult = true
+            }
+        }
+        .alert("Cartera", isPresented: $showResult) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(resultMessage ?? "")

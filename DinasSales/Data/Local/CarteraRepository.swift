@@ -106,11 +106,12 @@ struct CarteraRepository {
     func enqueueCreditRequest(clientCode: String, mode: CreditRequestMode,
                               reason: CreditRequestReason, manualAmount: Double?,
                               invoiceDocNum: String?, comments: String?,
-                              lines: [CreditRequestLineInput]) throws -> CreditRequest {
+                              lines: [CreditRequestLineInput],
+                              evidenceImageURL: String? = nil) throws -> CreditRequest {
         let request = CreditRequest(
             requestUUID: makeUUID(), clientCode: clientCode, mode: mode,
             reason: reason, manualAmount: manualAmount, invoiceDocNum: invoiceDocNum,
-            comments: comments, evidenceImageURL: nil, syncStatus: .queued,
+            comments: comments, evidenceImageURL: evidenceImageURL, syncStatus: .queued,
             createdAt: now(), syncedAt: nil)
         try database.dbQueue.write { db in
             try request.insert(db)

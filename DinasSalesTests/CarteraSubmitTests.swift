@@ -19,8 +19,13 @@ private final class SubmitStubAPI: CarteraUploadAPI, @unchecked Sendable {
         postedPayments.append(payment.paymentUUID)
         return AccountPaymentAccepted(paymentUUID: payment.paymentUUID, status: "PENDIENTE_APROBACION", receivedAt: nil)
     }
+    private(set) var postedRequests: [String] = []
+    private(set) var postedLineCounts: [Int] = []
     func postCreditRequest(_ request: CreditRequest, lines: [CreditRequestLine]) async throws -> CreditRequestAccepted {
-        CreditRequestAccepted(requestUUID: request.requestUUID, status: "", receivedAt: nil)
+        if let postError { throw postError }
+        postedRequests.append(request.requestUUID)
+        postedLineCounts.append(lines.count)
+        return CreditRequestAccepted(requestUUID: request.requestUUID, status: "PENDIENTE", receivedAt: nil)
     }
 }
 
@@ -97,5 +102,105 @@ final class CarteraSubmitTests: XCTestCase {
 
         XCTAssertEqual(outcome, .failed("El monto excede el saldo abierto."))
         XCTAssertEqual(try repo.failedPayments().first?.failureReason, "El monto excede el saldo abierto.")
+    }
+
+    // MARK: - Solicitud de crédito
+
+    private func conItemsDraft() -> CreditRequestDraft {
+        CreditRequestDraft(clientCode: "C1", mode: .conItems, reason: .damaged,
+                           manualAmount: nil, invoiceDocNum: nil, comments: nil,
+                           lines: [CreditRequestLineInput(itemCode: "I-1", quantity: 3, reason: .damaged),
+                                   CreditRequestLineInput(itemCode: "I-2", quantity: 1, reason: .damaged)])
+    }
+
+    private func sinItemsDraft() -> CreditRequestDraft {
+        CreditRequestDraft(clientCode: "C1", mode: .sinItems, reason: .mistake,
+                           manualAmount: 250, invoiceDocNum: "F-9", comments: nil, lines: [])
+    }
+
+    private func makeCreditService(_ db: AppDatabase, _ api: SubmitStubAPI) -> CarteraSubmitService {
+        var repo = CarteraRepository(database: db); repo.makeUUID = { "req-1" }
+        return CarteraSubmitService(repo: repo, api: api)
+    }
+
+    func test_credito_conItems_sinFoto_encolaConLineas() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        let repo = CarteraRepository(database: db)
+
+        let outcome = try await makeCreditService(db, api).submitCreditRequest(
+            conItemsDraft(), imageBase64: nil, isOnline: true)
+
+        XCTAssertEqual(outcome, .queued)
+        XCTAssertEqual(api.uploadedPhotos, 0)
+        XCTAssertEqual(api.postedRequests, [], "sin foto no postea en el momento")
+        let pending = try repo.pendingCreditRequests()
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(try repo.lines(requestUUID: "req-1").count, 2, "guardó las líneas CON_ITEMS")
+    }
+
+    func test_credito_sinItems_sinFoto_encolaSinLineas() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        let repo = CarteraRepository(database: db)
+
+        let outcome = try await makeCreditService(db, api).submitCreditRequest(
+            sinItemsDraft(), imageBase64: nil, isOnline: true)
+
+        XCTAssertEqual(outcome, .queued)
+        XCTAssertEqual(try repo.lines(requestUUID: "req-1").count, 0, "SIN_ITEMS no guarda líneas")
+        let stored = try await db.dbQueue.read { try CreditRequest.fetchOne($0, key: "req-1") }
+        XCTAssertEqual(stored?.manualAmount, 250)
+        XCTAssertEqual(stored?.mode, .sinItems)
+    }
+
+    func test_credito_conFoto_sinSenal_seBloquea_noCreaNada() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        let repo = CarteraRepository(database: db)
+
+        let outcome = try await makeCreditService(db, api).submitCreditRequest(
+            conItemsDraft(), imageBase64: "b64", isOnline: false)
+
+        XCTAssertEqual(outcome, .blockedNeedsConnection)
+        XCTAssertEqual(api.uploadedPhotos, 0)
+        XCTAssertTrue(try repo.pendingCreditRequests().isEmpty, "no se creó ningún registro")
+    }
+
+    func test_credito_conFoto_online_subeFoto_posteaConLineas_marcaSynced() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+
+        let outcome = try await makeCreditService(db, api).submitCreditRequest(
+            conItemsDraft(), imageBase64: "b64", isOnline: true)
+
+        XCTAssertEqual(outcome, .sent)
+        XCTAssertEqual(api.uploadedPhotos, 1)
+        XCTAssertEqual(api.postedRequests, ["req-1"])
+        XCTAssertEqual(api.postedLineCounts, [2], "posteó las 2 líneas")
+        let stored = try await db.dbQueue.read { try CreditRequest.fetchOne($0, key: "req-1") }
+        XCTAssertEqual(stored?.syncStatus, .synced)
+        XCTAssertEqual(stored?.evidenceImageURL, "https://mid/e/1.jpg")
+    }
+
+    func test_credito_conFoto_postFallaTransitorio_quedaEnColaConLaURL() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        api.postError = URLError(.timedOut)
+        let repo = CarteraRepository(database: db)
+
+        let outcome = try await makeCreditService(db, api).submitCreditRequest(
+            sinItemsDraft(), imageBase64: "b64", isOnline: true)
+
+        XCTAssertEqual(outcome, .pendingUpload)
+        XCTAssertEqual(api.uploadedPhotos, 1, "la foto se subió una sola vez")
+        XCTAssertEqual(try repo.pendingCreditRequests().first?.evidenceImageURL, "https://mid/e/1.jpg")
+    }
+
+    func test_credito_conFoto_4xx_quedaFailedConMotivo() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        api.postError = APIError.server(status: 422, message: "Factura ya saldada.")
+        let repo = CarteraRepository(database: db)
+
+        let outcome = try await makeCreditService(db, api).submitCreditRequest(
+            sinItemsDraft(), imageBase64: "b64", isOnline: true)
+
+        XCTAssertEqual(outcome, .failed("Factura ya saldada."))
+        XCTAssertEqual(try repo.failedCreditRequests().first?.failureReason, "Factura ya saldada.")
     }
 }
