@@ -132,6 +132,31 @@ final class CatalogRepositoryTests: XCTestCase {
         XCTAssertEqual(sinCat.items.map(\.itemCode), ["C1"])
     }
 
+    /// Regresión: el buscador del nivel 2 (una categoría) arranca SIEMPRE vacío, sin importar lo
+    /// que se haya escrito en el nivel 1, y no comparte estado con él. Cada nivel tiene su propio
+    /// CatalogViewModel. (También blinda contra dejar un default de searchText no vacío.)
+    @MainActor
+    func test_nivel2_arrancaVacio_independienteDelNivel1() throws {
+        let db = try AppDatabase.makeInMemory()
+        try seed(db, [
+            item("A1", name: "Café Latte", category: "Bebidas"),
+            item("A2", name: "Pan", category: "Panadería"),
+        ])
+        let repo = CatalogRepository(database: db)
+
+        // Nivel 1: el vendedor buscó algo.
+        let nivel1 = CatalogViewModel(repository: repo)                       // .all
+        nivel1.searchText = "cafe"
+
+        // Nivel 2: al entrar a una categoría se crea un VM PROPIO → arranca SIEMPRE vacío.
+        let nivel2 = CatalogViewModel(repository: repo, categoryFilter: .named("Bebidas"))
+        XCTAssertEqual(nivel2.searchText, "", "el buscador del nivel 2 arranca vacío")
+
+        // Sin estado compartido: escribir en el nivel 2 no se filtra al nivel 1 (ni viceversa).
+        nivel2.searchText = "otra cosa"
+        XCTAssertEqual(nivel1.searchText, "cafe", "el nivel 1 conserva lo suyo, sin fuga del nivel 2")
+    }
+
     func test_item_porCodigo() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db, [item("X-1", name: "Uno")])
