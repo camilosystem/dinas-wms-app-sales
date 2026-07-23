@@ -92,6 +92,12 @@ struct HomeView: View {
             .padding()
             .navigationTitle("Home")
             .toolbar {
+                // Engranaje → Ajustes (cuenta + backup/restauración del historial).
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink { SettingsView() } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Cerrar sesión") { auth.logout() }
                 }

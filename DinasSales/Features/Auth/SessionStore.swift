@@ -7,6 +7,8 @@ struct StoredSession: Codable, Equatable, Sendable {
     var username: String
     var displayName: String?
     var salespersonCode: String?
+    /// Rol del login (VENDEDOR | ADMIN). Opcional → sesiones viejas sin el campo decodifican a nil.
+    var role: String? = nil
     /// Momento del último login ONLINE exitoso (hora del dispositivo).
     var lastOnlineLoginAt: Date
     /// Hash de la contraseña para re-login OFFLINE (no se guarda la contraseña).

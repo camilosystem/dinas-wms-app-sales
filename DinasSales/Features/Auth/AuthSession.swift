@@ -28,6 +28,8 @@ final class AuthSession: ObservableObject {
     @Published private(set) var isAuthenticating = false
     @Published private(set) var displayName: String?
     @Published private(set) var username: String?
+    @Published private(set) var salespersonCode: String?
+    @Published private(set) var role: String?
     /// Token vencido (401): la app sigue usable offline, pero NO puede sincronizar hasta
     /// re-autenticarse con conexión.
     @Published private(set) var needsReauth = false
@@ -79,6 +81,8 @@ final class AuthSession: ObservableObject {
             } else {
                 displayName = session.displayName
                 username = session.username
+                salespersonCode = session.salespersonCode
+                role = session.role
                 state = .signedIn
             }
         } catch {
@@ -105,6 +109,7 @@ final class AuthSession: ObservableObject {
                 username: username,
                 displayName: response.displayName,
                 salespersonCode: response.salespersonCode,
+                role: response.role,
                 lastOnlineLoginAt: now(),
                 passwordHash: try hasher.hash(password),
                 loggedOut: false
@@ -112,6 +117,8 @@ final class AuthSession: ObservableObject {
             try store.save(session)
             displayName = response.displayName
             self.username = username
+            salespersonCode = response.salespersonCode
+            role = response.role
             needsReauth = false
             state = .signedIn
             AppLog.auth.info("login exitoso")
@@ -166,6 +173,8 @@ final class AuthSession: ObservableObject {
         try? store.save(updated)
         displayName = cred.displayName
         self.username = cred.username
+        salespersonCode = cred.salespersonCode
+        role = cred.role
         state = .signedIn
         AppLog.auth.info("login verificado offline con contraseña")
     }
@@ -179,6 +188,8 @@ final class AuthSession: ObservableObject {
         }
         displayName = nil
         username = nil
+        salespersonCode = nil
+        role = nil
         needsReauth = false
         loginFailure = nil
         state = .signedOut
