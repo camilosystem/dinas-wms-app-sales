@@ -1,9 +1,32 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.17.7
+  version: 0.17.8
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.17.8 — client_uuid ELIMINADO DE account-payments/credit-requests
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ CORRIGE
+      client_uuid quedó eliminado de AccountPaymentCreate y CreditRequestCreate.
+      Vacío real detectado por el agente de la app de vendedores: no existe
+      ninguna fuente de un "UUID de cliente" en todo el sistema — los
+      clientes se identifican por client_code (CardCode de SAP). El campo
+      era un residuo de copiar el patrón de OrderCreate, donde client_uuid
+      es en realidad la clave de idempotencia de LA ORDEN (nombre histórico
+      confuso, pero establecido y no se toca). En account-payments/
+      credit-requests esa idempotencia ya la cubren payment_uuid/request_uuid
+      — client_uuid no tenía ningún rol real, solo bloqueaba el POST porque
+      la app no tenía de dónde sacarlo.
+
+    ★ IMPACTO CONOCIDO
+      Reabre trabajo ya cerrado en dinas-wms-middleware: cualquier
+      validación/columna que dependiera de client_uuid en AccountPayments/
+      CreditRequests debe eliminarse (columna, si existe; validación de
+      requerido; mapeo en el DTO). Confirmar contra la entidad real antes
+      de asumir qué existe.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.17.7 — EVIDENCIA OPCIONAL TAMBIÉN EN account-payments
@@ -3500,13 +3523,12 @@ components:
 
     AccountPaymentCreate:
       type: object
-      required: [payment_uuid, client_uuid, client_code, amount, method, payment_date]
+      required: [payment_uuid, client_code, amount, method, payment_date]
       properties:
         payment_uuid:
           type: string
           format: uuid
           description: Identidad del pago, generada por la app. Hace el POST idempotente.
-        client_uuid: { type: string, format: uuid }
         client_code: { type: string }
         amount: { type: number, format: double, minimum: 0.01 }
         method: { $ref: '#/components/schemas/AccountPaymentMethod' }
@@ -3604,13 +3626,12 @@ components:
 
     CreditRequestCreate:
       type: object
-      required: [request_uuid, client_uuid, client_code, reason]
+      required: [request_uuid, client_code, reason]
       properties:
         request_uuid:
           type: string
           format: uuid
           description: Identidad de la solicitud, generada por la app. Hace el POST idempotente.
-        client_uuid: { type: string, format: uuid }
         client_code: { type: string }
         invoice_doc_num:
           type: string
