@@ -93,27 +93,28 @@ struct CatalogView: View {
         }
     }
 
-    /// Vista "Por Categoría": el MISMO grid de 2 columnas, agrupado en secciones con la categoría
-    /// como encabezado. Al buscar, solo aparecen las secciones con ítems que coinciden.
+    /// Vista "Por Categoría": UN SOLO `LazyVGrid` de 2 columnas con secciones nativas (la
+    /// categoría como encabezado que ocupa todo el ancho). Clave contra el congelamiento: NO se
+    /// anida `LazyVGrid` dentro de `LazyVStack` (eso anulaba la carga perezosa y colgaba el hilo
+    /// principal). Al buscar, solo aparecen las secciones con ítems que coinciden.
     private var categoryGrid: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            LazyVGrid(columns: columns, spacing: 12, pinnedViews: [.sectionHeaders]) {
                 ForEach(viewModel.categorySections) { section in
                     Section {
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(section.items) { item in
-                                cell(item)
-                            }
+                        ForEach(section.items) { item in
+                            cell(item)
                         }
                     } header: {
                         Text(section.category)
                             .font(.headline)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 4)
+                            .padding(.vertical, 6)
+                            .background(.regularMaterial)   // opaco al fijarse (pinned)
                     }
                 }
             }
-            .padding()
+            .padding(.horizontal)
         }
     }
 

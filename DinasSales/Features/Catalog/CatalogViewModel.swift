@@ -13,6 +13,9 @@ struct CatalogSection: Identifiable, Equatable {
 final class CatalogViewModel: ObservableObject {
     @Published var searchText = "" { didSet { reload() } }
     @Published private(set) var items: [Item] = []
+    /// Secciones por categoría, CACHEADAS: se recalculan solo al recargar (no en cada render).
+    /// Recomputar la agrupación en cada actualización de SwiftUI congelaba el hilo principal.
+    @Published private(set) var categorySections: [CatalogSection] = []
     @Published private(set) var loadError = false
 
     private let repository: CatalogRepository
@@ -26,15 +29,14 @@ final class CatalogViewModel: ObservableObject {
     func reload() {
         do {
             items = try repository.items(matching: searchText)
+            categorySections = Self.groupByCategory(items)
             loadError = false
         } catch {
             items = []
+            categorySections = []
             loadError = true
         }
     }
-
-    /// Secciones de la lista actual (ya filtrada por búsqueda), para la vista "Por Categoría".
-    var categorySections: [CatalogSection] { Self.groupByCategory(items) }
 
     /// Agrupa ítems por categoría: categorías ordenadas alfabéticamente, ítems por nombre dentro
     /// de cada una. Los sin categoría van en "Sin categoría" AL FINAL. Como recibe los ítems ya

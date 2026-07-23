@@ -13,6 +13,8 @@ struct ClientCitySection: Identifiable, Equatable {
 final class ClientsViewModel: ObservableObject {
     @Published var searchText = "" { didSet { reload() } }
     @Published private(set) var clients: [Client] = []
+    /// Secciones por ciudad, CACHEADAS: se recalculan solo al recargar (no en cada render).
+    @Published private(set) var citySections: [ClientCitySection] = []
     @Published private(set) var loadError = false
 
     private let repository: ClientsRepository
@@ -29,15 +31,14 @@ final class ClientsViewModel: ObservableObject {
     func reload() {
         do {
             clients = try repository.clients(matching: searchText, activeOnly: activeOnly)
+            citySections = Self.groupByCity(clients)
             loadError = false
         } catch {
             clients = []
+            citySections = []
             loadError = true
         }
     }
-
-    /// Secciones de la lista actual (ya filtrada por búsqueda), para la vista "Por Ciudad".
-    var citySections: [ClientCitySection] { Self.groupByCity(clients) }
 
     /// Agrupa clientes por ciudad: ciudades ordenadas alfabéticamente, clientes por nombre
     /// dentro de cada una. Los que no tienen ciudad van en "Sin ciudad" AL FINAL. Como recibe
