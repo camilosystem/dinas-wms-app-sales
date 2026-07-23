@@ -204,24 +204,7 @@ struct ReportPaymentView: View {
         guard let item,
               let data = try? await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data) else { return }
-        let resized = image.resizedForEvidence()
-        if let jpeg = resized.jpegData(compressionQuality: 0.7) {
-            photoBase64 = jpeg.base64EncodedString()
-        }
+        photoBase64 = image.evidenceBase64()
     }
     #endif
 }
-
-#if os(iOS)
-private extension UIImage {
-    /// Reduce el lado mayor a ~1024px (foto de evidencia ligera, ~150-300 KB).
-    func resizedForEvidence(maxSide: CGFloat = 1024) -> UIImage {
-        let side = max(size.width, size.height)
-        guard side > maxSide else { return self }
-        let scale = maxSide / side
-        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: newSize)
-        return renderer.image { _ in draw(in: CGRect(origin: .zero, size: newSize)) }
-    }
-}
-#endif
