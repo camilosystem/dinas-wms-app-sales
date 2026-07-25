@@ -1,9 +1,109 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.17.8
+  version: 0.19.1
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.19.1 — CORRECCIÓN: CANAL SOLO EFECTIVO/CHEQUE, TRANSFERENCIA
+    APARTE, Y NUEVO ORIGEN "REPORTAR PAGO DESDE EL DASHBOARD"
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ CORRIGE de v0.19.0
+      v0.19.0 decía que PaymentChannel (Oficina/Vendedor) era transversal a
+      EFECTIVO/CHEQUE/TRANSFERENCIA. Era incorrecto — TRANSFERENCIA no usa
+      ese concepto. En su lugar:
+
+      - PaymentChannel (OFICINA|VENDEDOR): ahora SOLO para EFECTIVO/CHEQUE.
+      - TransferBankAccount (CHASE_9280|CHASE_7815) — NUEVO. Exclusivo de
+        TRANSFERENCIA, elegido directamente por quien reporta (no pasa por
+        Oficina/Vendedor).
+
+    ★ QUÉ AGREGA (nuevo alcance: pagos reportados desde el Dashboard)
+      Hasta ahora, POST /account-payments solo lo llamaba la app de
+      vendedores (caller VENDEDOR). Ahora también lo puede llamar el
+      Dashboard (caller ADMIN), para una pantalla nueva de "Reportar Pago"
+      ahí — mismo formulario que la app (facturas, monto, foto opcional).
+
+      El comportamiento de payment_channel y salesperson_code (nuevo campo)
+      depende de qué ROL hizo el POST:
+      - VENDEDOR (app): payment_channel se fija a VENDEDOR automáticamente
+        (la app no lo envía ni lo conoce); salesperson_code se toma del
+        propio vendedor autenticado (cualquier valor enviado se ignora).
+      - ADMIN (Dashboard): payment_channel es OBLIGATORIO para EFECTIVO/
+        CHEQUE (el usuario de oficina elige, por defecto Oficina);
+        salesperson_code es OBLIGATORIO (a qué vendedor se atribuye el pago).
+
+      transfer_bank_account y check_number/bank_code se piden igual sin
+      importar el rol del caller.
+
+      Mapeo de cuentas confirmado (PaymentAccountMapping):
+      EFECTIVO+OFICINA=110002, EFECTIVO+VENDEDOR=110004,
+      CHEQUE+OFICINA=110099, CHEQUE+VENDEDOR=110003,
+      TRANSFERENCIA+CHASE_9280=111001, TRANSFERENCIA+CHASE_7815=111002.
+
+    ★ QUÉ NO CAMBIA
+      OTRO sigue sin integrarse automáticamente a SAP — no requiere
+      payment_channel, transfer_bank_account, ni cuenta resuelta.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.19.0 — CANAL DE PAGO Y DATOS DE CHEQUE (versión superada,
+    ver corrección arriba)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Descubierto durante las pruebas reales de IncomingPayments contra SAP:
+      el AccountPaymentMethod (EFECTIVO/CHEQUE/TRANSFERENCIA/OTRO) por sí
+      solo NO alcanza para saber qué cuenta contable usar en SAP — el
+      vendedor/oficina elige, en el momento de la transacción, POR CUÁL DE
+      DOS CANALES entró el dinero (Oficina vs Vendedor/Contratista), y eso
+      determina la cuenta real.
+
+      - payment_channel (enum OFICINA | VENDEDOR) — nuevo en
+        AccountPaymentCreate y PendingAccountPayment. Obligatorio si method
+        ∈ {EFECTIVO, CHEQUE, TRANSFERENCIA}; debe ser null si method=OTRO.
+      - check_number, bank_code — nuevos en AccountPaymentCreate y
+        PendingAccountPayment. Obligatorios solo si method=CHEQUE.
+      - resolved_account_code — nuevo en el payload embebido de
+        SapAccountPaymentSyncTask.account_payment. Lo resuelve el middleware
+        server-side (tabla PaymentAccountMapping: method+payment_channel→
+        cuenta), mismo principio que gl_account_code en créditos — el
+        vendedor nunca elige el número de cuenta a mano.
+
+      Mapeo confirmado (PaymentAccountMapping, a sembrar en el middleware):
+      EFECTIVO+OFICINA=110002, EFECTIVO+VENDEDOR=110004,
+      CHEQUE+OFICINA=110099, CHEQUE+VENDEDOR=110003,
+      TRANSFERENCIA+OFICINA=111001, TRANSFERENCIA+VENDEDOR=111002.
+
+    ★ QUÉ NO CAMBIA
+      OTRO sigue sin integrarse automáticamente a SAP — queda fuera de
+      alcance a propósito, se maneja manual. No requiere payment_channel ni
+      cuenta resuelta.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.18.0 — COLA DE INTEGRACIÓN SAP (SapIntegrationTask)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      4 endpoints nuevos consumidos ÚNICAMENTE por el sincronizador local
+      (Windows Service en el Windows Server, fuera de este repo): GET/POST
+      de pendientes y resultado para account-payments y credit-requests
+      (/admin/sap-sync/*). Auth: rol ADMIN (el sincronizador se loguea como
+      cuenta de servicio, no hay rol nuevo).
+
+      Esta es la primera pieza del proyecto de integración REAL a SAP
+      Service Layer (reemplaza el stub de IncomingPayments/CreditNotes).
+      La cola es genérica (SapIntegrationTask, document_type como string
+      libre) para cubrir tipos de documento futuros (órdenes→facturas,
+      retornos→voids, etc.) sin migración — pero los ENDPOINTS son
+      específicos por tipo, no un endpoint genérico universal.
+
+      IMPORTANTE: estos endpoints todavía NO tocan AccountPayment/
+      CreditRequest. Los endpoints de aprobación existentes (v0.17.x)
+      siguen usando el stub de integración tal cual — el corte hacia esta
+      cola real es un paso posterior, deliberado, para cuando el
+      sincronizador exista y esté probado.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.17.8 — client_uuid ELIMINADO DE account-payments/credit-requests
@@ -1308,6 +1408,136 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: Ya fue decidida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.18.0 — COLA DE INTEGRACIÓN SAP (SapIntegrationTask)
+  # ═══════════════════════════════════════════════════════════════
+  # Consumidos por el sincronizador local (Windows Service en el Windows
+  # Server), NUNCA por la app de vendedores ni el Dashboard directamente.
+  # Auth: requiere rol ADMIN (el sincronizador se loguea como una cuenta
+  # de servicio ADMIN — no hay rol nuevo para esto).
+  #
+  # Solo cubre los 2 tipos de documento que ya existen (ACCOUNT_PAYMENT,
+  # CREDIT_REQUEST). Tipos futuros (órdenes→facturas, retornos→voids,
+  # etc.) tendrán su propio par de endpoints cuando existan — no se
+  # generaliza este par para adivinar el futuro.
+  #
+  # IMPORTANTE: estos endpoints NO tocan AccountPayment/CreditRequest
+  # todavía — el corte del stub actual hacia esta cola real es un paso
+  # posterior, deliberadamente separado.
+
+  /admin/sap-sync/account-payments/pending:
+    get:
+      tags: [sap-sync]
+      summary: Tareas de integración SAP pendientes — pagos de cartera
+      description: >
+        ★ v0.18.0. REQUIERE rol ADMIN. Trae tareas con status PENDIENTE o
+        ERROR (para reintento automático en el próximo ciclo del
+        sincronizador). `forced` es informativo — el sincronizador decide
+        si lo usa para saltarse su ventana horaria; el filtro de este
+        endpoint es únicamente por status, no por `forced`.
+      responses:
+        '200':
+          description: Lista de tareas pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items: { $ref: '#/components/schemas/SapAccountPaymentSyncTask' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/sap-sync/account-payments/{task_id}/result:
+    post:
+      tags: [sap-sync]
+      summary: Reportar el resultado de integrar un pago de cartera a SAP
+      description: >
+        ★ v0.18.0. REQUIERE rol ADMIN. Actualiza ÚNICAMENTE
+        SapIntegrationTask (no toca AccountPayment — ese corte es
+        posterior). 409 si la tarea ya está en estado INTEGRADO.
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SapSyncResultReport' }
+      responses:
+        '200':
+          description: Resultado registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SapAccountPaymentSyncTask' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: La tarea ya está INTEGRADO
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/sap-sync/credit-requests/pending:
+    get:
+      tags: [sap-sync]
+      summary: Tareas de integración SAP pendientes — solicitudes de crédito
+      description: >
+        ★ v0.18.0. REQUIERE rol ADMIN. Mismo criterio de elegibilidad que
+        la de pagos (status PENDIENTE o ERROR; `forced` informativo).
+      responses:
+        '200':
+          description: Lista de tareas pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items: { $ref: '#/components/schemas/SapCreditRequestSyncTask' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/sap-sync/credit-requests/{task_id}/result:
+    post:
+      tags: [sap-sync]
+      summary: Reportar el resultado de integrar una solicitud de crédito a SAP
+      description: >
+        ★ v0.18.0. REQUIERE rol ADMIN. Actualiza ÚNICAMENTE
+        SapIntegrationTask (no toca CreditRequest — corte posterior).
+        409 si la tarea ya está en estado INTEGRADO.
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SapSyncResultReport' }
+      responses:
+        '200':
+          description: Resultado registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SapCreditRequestSyncTask' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: La tarea ya está INTEGRADO
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -3485,10 +3715,178 @@ components:
         estado terminal-reintentable: no vuelve a PENDIENTE_APROBACION ni
         requiere nueva aprobación del usuario, solo reintentar la integración.
 
+    SapIntegrationTaskStatus:
+      type: string
+      enum: [PENDIENTE, EN_PROCESO, INTEGRADO, ERROR]
+      description: >
+        ★ v0.18.0 — Estado de una tarea en la cola genérica de integración
+        SAP (SapIntegrationTask). Independiente de ApprovalStatus: esta cola
+        es sobre el PASO DE INTEGRACIÓN A SAP en sí (lo procesa el
+        sincronizador local), no sobre la decisión de negocio de aprobar/
+        rechazar (eso ya pasó antes de que exista la tarea).
+
+    SapSyncResultReport:
+      type: object
+      description: >
+        ★ v0.18.0. Body que el sincronizador envía al reportar el resultado
+        de un intento de integración. Actualiza únicamente SapIntegrationTask.
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [INTEGRADO, ERROR]
+          description: Resultado del intento — no se reporta PENDIENTE/EN_PROCESO aquí.
+        sap_reference:
+          type: string
+          nullable: true
+          description: Requerido si status=INTEGRADO (doc_num u otro id de SAP).
+        error_detail:
+          type: string
+          nullable: true
+          description: Requerido si status=ERROR.
+
+    SapAccountPaymentSyncTask:
+      type: object
+      description: >
+        ★ v0.18.0. Una tarea pendiente de integrar, con el AccountPayment
+        completo embebido (payload "gordo" — el sincronizador no necesita
+        una segunda consulta para armar IncomingPayments).
+      properties:
+        task_id: { type: integer }
+        document_uuid: { type: string, format: uuid, description: "= payment_uuid" }
+        status: { $ref: '#/components/schemas/SapIntegrationTaskStatus' }
+        forced:
+          type: boolean
+          description: Informativo — no es un filtro del GET. Ver descripción del endpoint.
+        attempts: { type: integer }
+        error_detail: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_attempt_at: { type: string, format: date-time, nullable: true }
+        account_payment:
+          type: object
+          description: >
+            Snapshot del AccountPayment ya APROBADO, con la imputación
+            CONFIRMADA (no la propuesta) — lo que el sincronizador necesita
+            para construir IncomingPayments.
+          properties:
+            payment_uuid: { type: string, format: uuid }
+            client_code: { type: string }
+            amount: { type: number, format: double }
+            method: { $ref: '#/components/schemas/AccountPaymentMethod' }
+            payment_channel:
+              $ref: '#/components/schemas/PaymentChannel'
+              description: "★ v0.19.1. Crudo, solo para auditoría/Remarks — el sincronizador usa resolved_account_code, no esto."
+            transfer_bank_account:
+              $ref: '#/components/schemas/TransferBankAccount'
+              description: "★ v0.19.1. Crudo, solo para auditoría/Remarks — el sincronizador usa resolved_account_code, no esto."
+            resolved_account_code:
+              type: string
+              nullable: true
+              description: >
+                ★ v0.19.1. Cuenta contable REAL de SAP, ya resuelta server-side
+                por el middleware vía PaymentAccountMapping (method +
+                payment_channel para EFECTIVO/CHEQUE, o method +
+                transfer_bank_account para TRANSFERENCIA). El sincronizador la
+                usa tal cual como CashAccount/CheckAccount/TransferAccount
+                según method — nunca la resuelve ni la elige por su cuenta.
+                Null si method=OTRO (fuera de esta integración, se maneja
+                manual).
+            check_number:
+              type: string
+              nullable: true
+              description: "★ v0.19.0. Solo si method=CHEQUE."
+            bank_code:
+              type: string
+              nullable: true
+              description: "★ v0.19.0. Solo si method=CHEQUE."
+            payment_date: { type: string, format: date }
+            confirmed_applications:
+              type: array
+              description: La imputación final que confirmó el aprobador (no la propuesta del vendedor).
+              items: { $ref: '#/components/schemas/InvoiceApplication' }
+            unapplied_amount:
+              type: number
+              format: double
+              description: Sobrante/faltante que quedó como pago a cuenta sin aplicar.
+            decided_by: { type: string }
+            decided_at: { type: string, format: date-time }
+
+    SapCreditRequestSyncTask:
+      type: object
+      description: ★ v0.18.0. Igual que SapAccountPaymentSyncTask, para créditos.
+      properties:
+        task_id: { type: integer }
+        document_uuid: { type: string, format: uuid, description: "= request_uuid" }
+        status: { $ref: '#/components/schemas/SapIntegrationTaskStatus' }
+        forced: { type: boolean }
+        attempts: { type: integer }
+        error_detail: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_attempt_at: { type: string, format: date-time, nullable: true }
+        credit_request:
+          type: object
+          description: >
+            Snapshot del CreditRequest ya APROBADO. Para SIN_ITEMS incluye
+            gl_account_code ya resuelto (nunca lo elige el sincronizador).
+            La modalidad NO es un campo propio — se infiere igual que en el
+            resto del contrato: `lines` presente + `manual_amount` null =
+            CON_ITEMS; `manual_amount` presente + `lines` null = SIN_ITEMS.
+          properties:
+            request_uuid: { type: string, format: uuid }
+            client_code: { type: string }
+            reason: { $ref: '#/components/schemas/CreditRequestReason' }
+            invoice_doc_num: { type: string, nullable: true }
+            manual_amount: { type: number, format: double, nullable: true }
+            calculated_amount: { type: number, format: double }
+            gl_account_code:
+              type: string
+              nullable: true
+              description: Resuelto al aprobar (SIN_ITEMS). Null en CON_ITEMS (SAP resuelve por línea).
+            lines:
+              type: array
+              nullable: true
+              items: { $ref: '#/components/schemas/CreditRequestLine' }
+            decided_by: { type: string }
+            decided_at: { type: string, format: date-time }
+
     AccountPaymentMethod:
       type: string
       enum: [EFECTIVO, CHEQUE, TRANSFERENCIA, OTRO]
       description: ★ v0.17.0 — Cómo pagó el cliente al vendedor (distinto de PaymentType del driver).
+
+    PaymentChannel:
+      type: string
+      enum: [OFICINA, VENDEDOR]
+      description: >
+        ★ v0.19.1 (corregido — v0.19.0 decía "transversal a EFECTIVO/CHEQUE/
+        TRANSFERENCIA", eso estaba mal). Aplica ÚNICAMENTE a EFECTIVO y
+        CHEQUE. NO aplica a TRANSFERENCIA (ver TransferBankAccount) ni a OTRO.
+        Junto con AccountPaymentMethod, resuelve la cuenta contable real en
+        SAP vía PaymentAccountMapping (mismo principio que CreditReasonGLAccount
+        — nadie elige el número de cuenta a mano).
+
+        Quién lo provee depende del ROL de quien hace el POST:
+        - Si el caller está autenticado como VENDEDOR (la app de vendedores):
+          este campo NO se envía — el servidor fija VENDEDOR automáticamente
+          para EFECTIVO/CHEQUE. La app no muestra ni conoce este concepto.
+        - Si el caller está autenticado como ADMIN (Dashboard): el campo es
+          OBLIGATORIO para EFECTIVO/CHEQUE — el usuario de oficina elige
+          Oficina o Vendedor explícitamente (por defecto Oficina en la UI,
+          pero puede cambiarlo).
+        Debe ser null si method ∈ {TRANSFERENCIA, OTRO}, para cualquier caller.
+
+    TransferBankAccount:
+      type: string
+      enum: [CHASE_9280, CHASE_7815]
+      description: >
+        ★ v0.19.1. Aplica ÚNICAMENTE a TRANSFERENCIA — NO usa el concepto de
+        PaymentChannel (Oficina/Vendedor no aplica aquí). Lo elige
+        directamente quien reporta el pago (vendedor O admin, cualquiera de
+        los dos), indicando a cuál de las dos cuentas bancarias llegó la
+        transferencia. Resuelve la cuenta real vía PaymentAccountMapping,
+        igual mecanismo que PaymentChannel pero sin la indirección
+        Oficina/Vendedor. OBLIGATORIO si method = TRANSFERENCIA. Debe ser
+        null para cualquier otro method.
 
     EvidencePhotoUpload:
       type: object
@@ -3530,8 +3928,39 @@ components:
           format: uuid
           description: Identidad del pago, generada por la app. Hace el POST idempotente.
         client_code: { type: string }
+        salesperson_code:
+          type: string
+          nullable: true
+          description: >
+            ★ v0.19.1. Si el caller es VENDEDOR: se IGNORA cualquier valor
+            enviado — el servidor usa el código del propio vendedor
+            autenticado. Si el caller es ADMIN (Dashboard): OBLIGATORIO,
+            el usuario de oficina elige a qué vendedor atribuir el pago.
         amount: { type: number, format: double, minimum: 0.01 }
         method: { $ref: '#/components/schemas/AccountPaymentMethod' }
+        payment_channel:
+          $ref: '#/components/schemas/PaymentChannel'
+          description: >
+            ★ v0.19.1. Ver PaymentChannel — solo EFECTIVO/CHEQUE, condicionado
+            por rol del caller (ver ahí el detalle completo). Null si
+            method ∈ {TRANSFERENCIA, OTRO}.
+        transfer_bank_account:
+          $ref: '#/components/schemas/TransferBankAccount'
+          description: >
+            ★ v0.19.1. OBLIGATORIO si method = TRANSFERENCIA (cualquier
+            caller, vendedor o admin). Null para cualquier otro method.
+        check_number:
+          type: string
+          nullable: true
+          description: >
+            ★ v0.19.0. OBLIGATORIO si method = CHEQUE (número de cheque, SAP
+            CheckNumber). Debe ser null para cualquier otro method.
+        bank_code:
+          type: string
+          nullable: true
+          description: >
+            ★ v0.19.0. OBLIGATORIO si method = CHEQUE (código de banco, SAP
+            BankCode). Debe ser null para cualquier otro method.
         payment_date: { type: string, format: date }
         comments: { type: string, nullable: true }
         evidence_image_url:
@@ -3543,8 +3972,8 @@ components:
         proposed_applications:
           type: array
           description: >
-            Imputación PROPUESTA por el vendedor (opcional). El aprobador
-            puede confirmarla tal cual o reemplazarla.
+            Imputación PROPUESTA por el vendedor o por el usuario de oficina
+            (opcional). El aprobador puede confirmarla tal cual o reemplazarla.
           items: { $ref: '#/components/schemas/InvoiceApplication' }
 
     AccountPaymentAccepted:
@@ -3564,6 +3993,10 @@ components:
         salesperson_code: { type: string }
         amount: { type: number, format: double }
         method: { $ref: '#/components/schemas/AccountPaymentMethod' }
+        payment_channel: { $ref: '#/components/schemas/PaymentChannel' }
+        transfer_bank_account: { $ref: '#/components/schemas/TransferBankAccount' }
+        check_number: { type: string, nullable: true }
+        bank_code: { type: string, nullable: true }
         payment_date: { type: string, format: date }
         comments: { type: string, nullable: true }
         evidence_image_url: { type: string, nullable: true }
