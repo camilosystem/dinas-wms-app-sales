@@ -21,6 +21,9 @@ struct ReportPaymentView: View {
     @State private var appliedAmount: [String: Double] = [:]  // monto propuesto por factura
     @State private var amount: Double = 0
     @State private var method: AccountPaymentMethod = .efectivo
+    @State private var bank: TransferBankAccount?      // solo TRANSFERENCIA
+    @State private var checkNumber = ""                 // solo CHEQUE
+    @State private var bankCode = ""                    // solo CHEQUE
     @State private var paymentDate = Date()
     @State private var comments = ""
     @State private var photoBase64: String?
@@ -48,6 +51,21 @@ struct ReportPaymentView: View {
                     Picker("Método", selection: $method) {
                         ForEach(AccountPaymentMethod.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
+                    // ★ v0.19.1 — datos condicionados por método.
+                    if method == .transferencia {
+                        Picker("Banco (destino)", selection: $bank) {
+                            Text("Selecciona…").tag(TransferBankAccount?.none)
+                            ForEach(TransferBankAccount.allCases, id: \.self) {
+                                Text($0.label).tag(TransferBankAccount?.some($0))
+                            }
+                        }
+                    } else if method == .cheque {
+                        TextField("Número de cheque", text: $checkNumber)
+                        TextField("Código de banco", text: $bankCode)
+                            #if os(iOS)
+                            .autocapitalization(.allCharacters)
+                            #endif
+                    }
                     DatePicker("Fecha", selection: $paymentDate, in: ...Date(),
                                displayedComponents: .date)
                     TextField("Comentarios (opcional)", text: $comments, axis: .vertical)
@@ -71,7 +89,7 @@ struct ReportPaymentView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Reportar") { Task { await submit() } }
-                        .disabled(amount <= 0 || submitting)
+                        .disabled(amount <= 0 || !methodDetailsValid || submitting)
                 }
             }
         }
@@ -157,6 +175,20 @@ struct ReportPaymentView: View {
         }
     }
 
+    /// Trim de los datos de cheque (se validan/envían sin espacios).
+    private var trimmedCheckNumber: String { checkNumber.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedBankCode: String { bankCode.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Validación cliente de los datos condicionados por método (★ v0.19.1):
+    /// TRANSFERENCIA exige banco; CHEQUE exige número y código de banco. EFECTIVO/OTRO no piden nada.
+    private var methodDetailsValid: Bool {
+        switch method {
+        case .transferencia: return bank != nil
+        case .cheque: return !trimmedCheckNumber.isEmpty && !trimmedBankCode.isEmpty
+        case .efectivo, .otro: return true
+        }
+    }
+
     private func submit() async {
         submitting = true; errorMessage = nil
         defer { submitting = false }
@@ -165,10 +197,15 @@ struct ReportPaymentView: View {
             .filter { selected.contains($0.invoiceDocNum) }
             .map { InvoiceApplication(invoiceDocNum: $0.invoiceDocNum,
                                       amount: appliedAmount[$0.invoiceDocNum] ?? $0.amount) }
+        // Solo se adjunta el dato del método correspondiente; el resto queda nil (el contrato exige
+        // null en los otros métodos). La UI condicional ya garantiza que no se mezclen.
         let draft = PaymentDraft(
             clientCode: client.clientCode, method: method, amount: amount, paymentDate: paymentDate,
             comments: comments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : comments,
-            proposedApplications: apps)
+            proposedApplications: apps,
+            transferBankAccount: method == .transferencia ? bank : nil,
+            checkNumber: method == .cheque ? trimmedCheckNumber : nil,
+            bankCode: method == .cheque ? trimmedBankCode : nil)
         let service = CarteraSubmitService(
             repo: CarteraRepository(database: environment.database), api: environment.api)
 

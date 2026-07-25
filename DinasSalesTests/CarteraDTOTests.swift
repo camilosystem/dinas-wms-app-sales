@@ -33,6 +33,45 @@ final class CarteraDTOTests: XCTestCase {
         XCTAssertEqual(apps?.count, 2)
         XCTAssertEqual(apps?[0]["invoice_doc_num"] as? String, "F-1")
         XCTAssertEqual(apps?[0]["amount"] as? Double, 100)
+        // ★ v0.19.1 — EFECTIVO no lleva datos de banco/cheque, y la app NUNCA envía payment_channel.
+        XCTAssertNil(body["transfer_bank_account"])
+        XCTAssertNil(body["check_number"])
+        XCTAssertNil(body["bank_code"])
+        XCTAssertNil(body["payment_channel"], "la app de vendedores nunca envía payment_channel")
+    }
+
+    func test_accountPaymentCreate_transferencia_llevaBanco_sinCheque() throws {
+        let payment = AccountPayment(
+            paymentUUID: "pay-t", clientCode: "C1", method: .transferencia, amount: 200,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            transferBankAccount: .chase7815, checkNumber: nil, bankCode: nil,
+            evidenceImageURL: nil, proposedApplications: [],
+            syncStatus: .queued, createdAt: Date(), syncedAt: nil)
+
+        let body = try json(AccountPaymentCreateDTO(payment))
+
+        XCTAssertEqual(body["method"] as? String, "TRANSFERENCIA")
+        XCTAssertEqual(body["transfer_bank_account"] as? String, "CHASE_7815")
+        XCTAssertNil(body["check_number"], "TRANSFERENCIA no lleva datos de cheque")
+        XCTAssertNil(body["bank_code"])
+        XCTAssertNil(body["payment_channel"])
+    }
+
+    func test_accountPaymentCreate_cheque_llevaNumeroYBanco_sinTransferencia() throws {
+        let payment = AccountPayment(
+            paymentUUID: "pay-c", clientCode: "C1", method: .cheque, amount: 75,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            transferBankAccount: nil, checkNumber: "000123", bankCode: "BAC",
+            evidenceImageURL: nil, proposedApplications: [],
+            syncStatus: .queued, createdAt: Date(), syncedAt: nil)
+
+        let body = try json(AccountPaymentCreateDTO(payment))
+
+        XCTAssertEqual(body["method"] as? String, "CHEQUE")
+        XCTAssertEqual(body["check_number"] as? String, "000123")
+        XCTAssertEqual(body["bank_code"] as? String, "BAC")
+        XCTAssertNil(body["transfer_bank_account"], "CHEQUE no lleva banco de transferencia")
+        XCTAssertNil(body["payment_channel"])
     }
 
     // MARK: - Crédito

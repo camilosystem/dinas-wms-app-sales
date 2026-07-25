@@ -1,6 +1,8 @@
 import Foundation
 
-/// Borrador de un reporte de pago que llega desde la UI.
+/// Borrador de un reporte de pago que llega desde la UI. Los datos condicionados por método
+/// (★ v0.19.1) los arma la UI ya limpios: `transferBankAccount` solo si TRANSFERENCIA;
+/// `checkNumber`/`bankCode` solo si CHEQUE; nil en el resto (el contrato exige null en otros).
 struct PaymentDraft: Equatable {
     var clientCode: String
     var method: AccountPaymentMethod
@@ -8,6 +10,9 @@ struct PaymentDraft: Equatable {
     var paymentDate: Date
     var comments: String?
     var proposedApplications: [InvoiceApplication]
+    var transferBankAccount: TransferBankAccount? = nil
+    var checkNumber: String? = nil
+    var bankCode: String? = nil
 }
 
 /// Borrador de una solicitud de crédito que llega desde la UI.
@@ -51,7 +56,9 @@ struct CarteraSubmitService {
             _ = try repo.enqueuePayment(
                 clientCode: draft.clientCode, method: draft.method, amount: draft.amount,
                 paymentDate: draft.paymentDate, comments: draft.comments,
-                proposedApplications: draft.proposedApplications)
+                proposedApplications: draft.proposedApplications,
+                transferBankAccount: draft.transferBankAccount,
+                checkNumber: draft.checkNumber, bankCode: draft.bankCode)
             return .queued
         }
 
@@ -65,7 +72,9 @@ struct CarteraSubmitService {
         let payment = try repo.enqueuePayment(
             clientCode: draft.clientCode, method: draft.method, amount: draft.amount,
             paymentDate: draft.paymentDate, comments: draft.comments,
-            proposedApplications: draft.proposedApplications, evidenceImageURL: url)
+            proposedApplications: draft.proposedApplications,
+            transferBankAccount: draft.transferBankAccount,
+            checkNumber: draft.checkNumber, bankCode: draft.bankCode, evidenceImageURL: url)
         // 3. Postear el pago con la URL. La foto NO se resube pase lo que pase.
         do {
             _ = try await api.postAccountPayment(payment)

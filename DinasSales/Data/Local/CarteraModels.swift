@@ -21,6 +21,21 @@ enum AccountPaymentMethod: String, Codable, CaseIterable, Equatable {
     }
 }
 
+/// Cuenta bancaria a la que llegó la TRANSFERENCIA (`TransferBankAccount`, ★ v0.19.1). La elige
+/// quien reporta; NO usa el concepto Oficina/Vendedor. El middleware resuelve la cuenta contable
+/// real (PaymentAccountMapping). Solo aplica a `method == .transferencia`. Catálogo cerrado.
+enum TransferBankAccount: String, Codable, CaseIterable, Equatable {
+    case chase9280 = "CHASE_9280"
+    case chase7815 = "CHASE_7815"
+
+    var label: String {
+        switch self {
+        case .chase9280: return "Chase - 9280"
+        case .chase7815: return "Chase - 7815"
+        }
+    }
+}
+
 /// Motivo del ajuste (`CreditRequestReason`). Catálogo cerrado. La cuenta G/L la resuelve el
 /// middleware al aprobar (no en la app).
 enum CreditRequestReason: String, Codable, CaseIterable, Equatable {
@@ -83,6 +98,11 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
     var amount: Double
     var paymentDate: Date              // `format: date` en el contrato
     var comments: String?
+    /// Banco de la transferencia (★ v0.19.1). Solo en `method == .transferencia`; nil en otros.
+    var transferBankAccount: TransferBankAccount?
+    /// Datos de cheque (★ v0.19.0). Solo en `method == .cheque`; nil en otros.
+    var checkNumber: String?
+    var bankCode: String?
     /// Solo si el vendedor adjuntó foto (flujo síncrono). `nil` en los envíos en cola sin foto.
     var evidenceImageURL: String?
     /// Imputación PROPUESTA (opcional). GRDB la persiste como JSON en su columna.
@@ -101,6 +121,9 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
         case clientCode = "client_code"
         case method, amount, comments
         case paymentDate = "payment_date"
+        case transferBankAccount = "transfer_bank_account"
+        case checkNumber = "check_number"
+        case bankCode = "bank_code"
         case evidenceImageURL = "evidence_image_url"
         case proposedApplications = "proposed_applications"
         case syncStatus = "sync_status"

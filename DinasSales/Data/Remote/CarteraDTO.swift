@@ -29,6 +29,9 @@ struct EvidencePhotoUploaded: Decodable {
 
 /// `AccountPaymentCreate` — cuerpo de `POST /account-payments`. `payment_date` viaja como
 /// `format: date` (YYYY-MM-DD), no date-time.
+/// NO incluye `payment_channel`: la app de vendedores nunca lo envía — el server lo fija a
+/// VENDEDOR para EFECTIVO/CHEQUE. `transfer_bank_account` solo en TRANSFERENCIA; `check_number`/
+/// `bank_code` solo en CHEQUE (el resto quedan null, garantizado por la UI que arma el registro).
 struct AccountPaymentCreateDTO: Encodable {
     let paymentUUID: String
     let clientCode: String
@@ -36,6 +39,9 @@ struct AccountPaymentCreateDTO: Encodable {
     let method: AccountPaymentMethod
     let paymentDate: String                 // YYYY-MM-DD
     let comments: String?
+    let transferBankAccount: TransferBankAccount?
+    let checkNumber: String?
+    let bankCode: String?
     let evidenceImageURL: String?
     let proposedApplications: [InvoiceApplication]
 
@@ -44,6 +50,9 @@ struct AccountPaymentCreateDTO: Encodable {
         case clientCode = "client_code"
         case amount, method, comments
         case paymentDate = "payment_date"
+        case transferBankAccount = "transfer_bank_account"
+        case checkNumber = "check_number"
+        case bankCode = "bank_code"
         case evidenceImageURL = "evidence_image_url"
         case proposedApplications = "proposed_applications"
     }
@@ -55,6 +64,9 @@ struct AccountPaymentCreateDTO: Encodable {
         method = payment.method
         paymentDate = JSONCoding.dateOnlyString(payment.paymentDate)
         comments = payment.comments
+        transferBankAccount = payment.transferBankAccount
+        checkNumber = payment.checkNumber
+        bankCode = payment.bankCode
         evidenceImageURL = payment.evidenceImageURL
         proposedApplications = payment.proposedApplications
     }

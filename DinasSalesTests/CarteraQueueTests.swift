@@ -32,6 +32,29 @@ final class CarteraQueueTests: XCTestCase {
                        [InvoiceApplication(invoiceDocNum: "F-1", amount: 150)])
     }
 
+    func test_enqueuePayment_persisteBancoYCheque_roundTripGRDB() throws {
+        let db = try AppDatabase.makeInMemory()
+
+        // TRANSFERENCIA con banco.
+        let t = try makeRepo(db, uuid: "pay-t").enqueuePayment(
+            clientCode: "C1", method: .transferencia, amount: 200,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            proposedApplications: [], transferBankAccount: .chase9280)
+        let storedT = try db.dbQueue.read { try AccountPayment.fetchOne($0, key: t.paymentUUID) }
+        XCTAssertEqual(storedT?.transferBankAccount, .chase9280)
+        XCTAssertNil(storedT?.checkNumber); XCTAssertNil(storedT?.bankCode)
+
+        // CHEQUE con número + banco.
+        let c = try makeRepo(db, uuid: "pay-c").enqueuePayment(
+            clientCode: "C1", method: .cheque, amount: 75,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            proposedApplications: [], checkNumber: "000123", bankCode: "BAC")
+        let storedC = try db.dbQueue.read { try AccountPayment.fetchOne($0, key: c.paymentUUID) }
+        XCTAssertEqual(storedC?.checkNumber, "000123")
+        XCTAssertEqual(storedC?.bankCode, "BAC")
+        XCTAssertNil(storedC?.transferBankAccount)
+    }
+
     func test_pagoConFoto_seGuardaSynced_noEntraEnLaCola() throws {
         let db = try AppDatabase.makeInMemory()
         let repo = makeRepo(db)

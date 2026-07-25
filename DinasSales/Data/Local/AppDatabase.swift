@@ -327,6 +327,17 @@ final class AppDatabase {
             try db.alter(table: "credit_requests") { t in t.add(column: "failure_reason", .text) }
         }
 
+        // ★ v0.19.1 — Datos de banco/cheque en el pago de cartera. Nullable: solo se llenan según
+        // el método (transfer_bank_account en TRANSFERENCIA; check_number/bank_code en CHEQUE). NO
+        // se agrega payment_channel: la app nunca lo envía (el server lo fija a VENDEDOR).
+        migrator.registerMigration("v11_transferencia_cheque") { db in
+            try db.alter(table: "account_payments") { t in
+                t.add(column: "transfer_bank_account", .text)
+                t.add(column: "check_number", .text)
+                t.add(column: "bank_code", .text)
+            }
+        }
+
         return migrator
     }
 }

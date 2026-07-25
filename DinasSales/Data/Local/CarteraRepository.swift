@@ -24,10 +24,13 @@ struct CarteraRepository {
     func enqueuePayment(clientCode: String, method: AccountPaymentMethod,
                         amount: Double, paymentDate: Date, comments: String?,
                         proposedApplications: [InvoiceApplication],
+                        transferBankAccount: TransferBankAccount? = nil,
+                        checkNumber: String? = nil, bankCode: String? = nil,
                         evidenceImageURL: String? = nil) throws -> AccountPayment {
         let payment = AccountPayment(
             paymentUUID: makeUUID(), clientCode: clientCode,
             method: method, amount: amount, paymentDate: paymentDate, comments: comments,
+            transferBankAccount: transferBankAccount, checkNumber: checkNumber, bankCode: bankCode,
             evidenceImageURL: evidenceImageURL, proposedApplications: proposedApplications,
             syncStatus: .queued, createdAt: now(), syncedAt: nil)
         try database.dbQueue.write { try payment.insert($0) }
