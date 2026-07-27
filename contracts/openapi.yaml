@@ -1,9 +1,81 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.19.1
+  version: 0.21.0
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.21.0 — VENDEDOR CANCELA SU PROPIO REPORTE (CANCELADO)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Vacío real encontrado en el flujo de Reportar Pago de la app de
+      vendedores: si un vendedor reporta un pago o solicitud de crédito por
+      error (factura/monto/cliente equivocado) y ya se sincronizó al
+      servidor (PENDIENTE_APROBACION), no había forma de deshacerlo antes
+      de que el aprobador lo revisara — la factura quedaba bloqueada
+      permanentemente en la app (que bloquea nuevos reportes sobre una
+      factura con un pago activo).
+
+      - Nuevo estado CANCELADO en ApprovalStatus. Deliberadamente distinto
+        de RECHAZADO: RECHAZADO = el aprobador revisó y decidió no aprobar;
+        CANCELADO = el vendedor lo retiró antes de que nadie lo revisara.
+      - POST /account-payments/{payment_uuid}/cancel — REQUIERE rol
+        VENDEDOR (no el aprobador — ese sigue usando reject). Ownership
+        validado contra el token. Motivo opcional. 409 si ya no está
+        PENDIENTE_APROBACION.
+      - POST /credit-requests/{request_uuid}/cancel — mismo patrón, mismo
+        motivo (mismo problema puede darse en Solicitar Crédito).
+
+    ★ QUÉ NO CUBRE (a propósito)
+      Cancelar un pago/crédito YA APROBADO (posiblemente ya integrado a
+      SAP) es un problema distinto — ahí sí hay una transacción real que
+      revertir, con su propio rastro contable. Eso es responsabilidad del
+      usuario del Dashboard, no del vendedor, y queda como una función
+      aparte, futura, no diseñada en este cambio.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.20.0 — CORTE REAL: account-payments YA NO USA EL STUB
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ CAMBIA
+      Primer corte real del proyecto de integración SAP — SOLO para
+      account-payments. credit-requests sigue con el stub, sin cambios (esa
+      integración nunca se construyó en el sincronizador).
+
+      - POST /admin/account-payments/{id}/approve ya NO llama al stub de
+        integración. En su lugar, encola (o reactiva, si el registro estaba
+        en ERROR_INTEGRACION) una SapIntegrationTask real. El AccountPayment
+        queda APROBADO de inmediato (decisión de negocio), con
+        sap_incoming_payment_doc_num en NULL hasta que el sincronizador
+        reporte el resultado real.
+      - POST /admin/sap-sync/account-payments/{task_id}/result — CAMBIO DE
+        COMPORTAMIENTO respecto a v0.18.0-v0.19.x: ya NO actualiza
+        únicamente SapIntegrationTask. Ahora también actualiza el
+        AccountPayment real (INTEGRADO → doc_num real; ERROR →
+        ERROR_INTEGRACION). El endpoint equivalente de credit-requests NO
+        cambió — sigue actualizando únicamente la tarea.
+      - Reintento: un nuevo approve sobre un AccountPayment en
+        ERROR_INTEGRACION reactiva la MISMA fila de SapIntegrationTask
+        (vuelve a PENDIENTE, conserva attempts) — nunca crea una fila nueva,
+        para no arriesgar una doble integración.
+
+      Verificado end-to-end contra dev real: un pago quedó con
+      sap_incoming_payment_doc_num = un doc_num real de SAP (no un
+      placeholder "SIM-..."), y el ciclo ERROR→reintento→INTEGRADO fue
+      confirmado sin duplicar filas.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.19.2 — GET /admin/salespersons
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Vacío real encontrado por el agente del Dashboard al construir
+      "Reportar Pago": no existía forma de listar vendedores para el
+      selector obligatorio de salesperson_code. Se agrega GET
+      /admin/salespersons, mismo patrón que GET /admin/drivers (ya
+      existente) — lista de usuarios con Role=VENDEDOR, código + nombre.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.19.1 — CORRECCIÓN: CANAL SOLO EFECTIVO/CHEQUE, TRANSFERENCIA
@@ -1316,6 +1388,53 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /account-payments/{payment_uuid}/cancel:
+    post:
+      tags: [account-payments]
+      summary: El VENDEDOR cancela su propio pago reportado por error, antes de revisión
+      description: >
+        ★ v0.21.0. REQUIERE rol VENDEDOR — endpoint distinto de
+        /admin/account-payments/{payment_uuid}/reject (ese es del aprobador).
+        Solo el vendedor que reportó el pago puede cancelarlo (validar
+        ownership contra salesperson_code del token, 403 si no coincide).
+        Motivo OPCIONAL (a diferencia del reject del aprobador, que lo exige).
+        Deja el registro en CANCELADO — NO en RECHAZADO, son conceptos
+        distintos (ver ApprovalStatus). NO es el mecanismo para cancelar un
+        pago ya APROBADO o integrado a SAP — eso es una función aparte,
+        futura, del lado del Dashboard (reversar una transacción real en
+        SAP tiene su propio flujo, no este).
+      parameters:
+        - name: payment_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Pago cancelado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountPaymentDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: No es el vendedor dueño del pago, o rol incorrecto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El pago ya no está PENDIENTE_APROBACION (ya fue decidido)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /admin/credit-requests/pending:
     get:
       tags: [admin]
@@ -1412,6 +1531,48 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /credit-requests/{request_uuid}/cancel:
+    post:
+      tags: [credit-requests]
+      summary: El VENDEDOR cancela su propia solicitud de crédito reportada por error
+      description: >
+        ★ v0.21.0. Mismo patrón que /account-payments/{payment_uuid}/cancel
+        — REQUIERE rol VENDEDOR (distinto del reject del aprobador),
+        ownership validado contra el token, motivo OPCIONAL, deja el
+        registro en CANCELADO (no RECHAZADO). Solo válido mientras el
+        registro sigue PENDIENTE_APROBACION.
+      parameters:
+        - name: request_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Solicitud cancelada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditRequestDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: No es el vendedor dueño de la solicitud, o rol incorrecto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Ya no está PENDIENTE_APROBACION (ya fue decidida)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   # ═══════════════════════════════════════════════════════════════
   # ★ NUEVO v0.18.0 — COLA DE INTEGRACIÓN SAP (SapIntegrationTask)
   # ═══════════════════════════════════════════════════════════════
@@ -1458,9 +1619,14 @@ paths:
       tags: [sap-sync]
       summary: Reportar el resultado de integrar un pago de cartera a SAP
       description: >
-        ★ v0.18.0. REQUIERE rol ADMIN. Actualiza ÚNICAMENTE
-        SapIntegrationTask (no toca AccountPayment — ese corte es
-        posterior). 409 si la tarea ya está en estado INTEGRADO.
+        ★ v0.18.0, CORREGIDO en v0.20.0. REQUIERE rol ADMIN. Actualiza
+        SapIntegrationTask Y el AccountPayment real: INTEGRADO →
+        AccountPayment.sap_incoming_payment_doc_num = sap_reference (queda
+        APROBADO con la integración confirmada); ERROR → AccountPayment
+        pasa a ERROR_INTEGRACION (reintentable — un nuevo approve sobre un
+        registro en ERROR_INTEGRACION reactiva la MISMA SapIntegrationTask
+        a PENDIENTE, nunca crea una fila nueva). 409 si la tarea ya está en
+        estado INTEGRADO.
       parameters:
         - name: task_id
           in: path
@@ -1514,8 +1680,11 @@ paths:
       summary: Reportar el resultado de integrar una solicitud de crédito a SAP
       description: >
         ★ v0.18.0. REQUIERE rol ADMIN. Actualiza ÚNICAMENTE
-        SapIntegrationTask (no toca CreditRequest — corte posterior).
-        409 si la tarea ya está en estado INTEGRADO.
+        SapIntegrationTask (no toca CreditRequest — corte posterior, sigue
+        pendiente. A diferencia de account-payments, que YA tuvo su corte
+        en v0.20.0 — ver ese endpoint. CreditRequest sigue con el stub de
+        integración, no el sincronizador real). 409 si la tarea ya está en
+        estado INTEGRADO.
       parameters:
         - name: task_id
           in: path
@@ -3021,6 +3190,32 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /admin/salespersons:
+    get:
+      tags: [dispatch-admin]
+      summary: Lista de vendedores (para atribuir un pago reportado desde el Dashboard)
+      description: >
+        ★ v0.19.2 — REQUIERE ADMIN. Los usuarios con Role=VENDEDOR, para el
+        selector obligatorio de salesperson_code en la pantalla "Reportar
+        Pago" del Dashboard. Mismo patrón que /admin/drivers.
+      responses:
+        '200':
+          description: Lista de vendedores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  salespersons:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        salesperson_code: { type: string }
+                        display_name: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /admin/trucks/{truck_id}/assign-driver:
     post:
       tags: [dispatch-admin]
@@ -3706,7 +3901,7 @@ components:
     # ═══════════════ ★ NUEVO v0.17.0 — PAGOS DE CARTERA Y CRÉDITOS ═══════════════
     ApprovalStatus:
       type: string
-      enum: [PENDIENTE_APROBACION, APROBADO, RECHAZADO, ERROR_INTEGRACION]
+      enum: [PENDIENTE_APROBACION, APROBADO, RECHAZADO, ERROR_INTEGRACION, CANCELADO]
       description: >
         ★ v0.17.0 — Estado compartido por el flujo de aprobación de
         account-payments y credit-requests.
@@ -3714,6 +3909,15 @@ components:
         la escritura a SAP (IncomingPayments / CreditNotes) falló. Es un
         estado terminal-reintentable: no vuelve a PENDIENTE_APROBACION ni
         requiere nueva aprobación del usuario, solo reintentar la integración.
+        ★ v0.21.0 — Se agrega CANCELADO: el VENDEDOR (no el aprobador) canceló
+        su propio reporte por error de captura, ANTES de que nadie lo revisara
+        (solo posible mientras el registro sigue PENDIENTE_APROBACION).
+        Distinto de RECHAZADO a propósito — RECHAZADO significa que el
+        aprobador SÍ revisó el registro y decidió no aprobarlo; CANCELADO
+        significa que nunca llegó a revisión, el propio vendedor lo retiró.
+        Mantener esta distinción es lo que preserva el rastro real de qué
+        pasó con cada registro. CANCELADO es un estado terminal — no se
+        puede transicionar desde ahí a ningún otro estado.
 
     SapIntegrationTaskStatus:
       type: string
