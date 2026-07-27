@@ -93,6 +93,18 @@ struct CarteraRepository {
         try database.dbQueue.write { db in _ = try AccountPayment.deleteOne(db, key: paymentUUID) }
     }
 
+    /// Todos los pagos reportados de un cliente (cualquier estado), más recientes primero. Para
+    /// mostrar en el detalle del cliente qué se ha reportado y su estado (por enviar/reportado/
+    /// con problema), y evitar que el vendedor reporte dos veces lo mismo por confusión.
+    func payments(clientCode: String) throws -> [AccountPayment] {
+        try database.dbQueue.read { db in
+            try AccountPayment
+                .filter(Column("client_code") == clientCode)
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+        }
+    }
+
     /// Pagos con problema de sincronización (rechazados), para el panel de problemas.
     func failedPayments() throws -> [AccountPayment] {
         try database.dbQueue.read { db in

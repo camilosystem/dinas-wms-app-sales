@@ -55,6 +55,27 @@ final class CarteraQueueTests: XCTestCase {
         XCTAssertNil(storedC?.transferBankAccount)
     }
 
+    func test_payments_porCliente_devuelveTodosLosEstados_yEstadoVisible() throws {
+        let db = try AppDatabase.makeInMemory()
+        // Dos pagos de C1 (uno en cola, uno reportado) y uno de otro cliente que NO debe salir.
+        let queued = try makeRepo(db, uuid: "p-cola").enqueuePayment(
+            clientCode: "C1", method: .efectivo, amount: 10,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil, proposedApplications: [])
+        try makeRepo(db, uuid: "p-otro").enqueuePayment(
+            clientCode: "C2", method: .efectivo, amount: 99,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil, proposedApplications: [])
+        try makeRepo(db).markPaymentSynced(paymentUUID: queued.paymentUUID)  // C1 → reportado
+
+        let repo = CarteraRepository(database: db)
+        let deC1 = try repo.payments(clientCode: "C1")
+        XCTAssertEqual(deC1.map(\.paymentUUID), ["p-cola"], "solo pagos de C1")
+        XCTAssertEqual(deC1.first?.reportedStatus, .reportado, "synced → Reportado")
+
+        // Estado visible según sync_status.
+        let enCola = try repo.pendingPayments().first { $0.clientCode == "C2" }
+        XCTAssertEqual(enCola?.reportedStatus, .porEnviar, "queued → Por enviar")
+    }
+
     func test_pagoConFoto_seGuardaSynced_noEntraEnLaCola() throws {
         let db = try AppDatabase.makeInMemory()
         let repo = makeRepo(db)

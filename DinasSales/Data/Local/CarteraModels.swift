@@ -116,6 +116,17 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
     var id: String { paymentUUID }
     static let databaseTableName = "account_payments"
 
+    /// Estado visible para el vendedor en el detalle del cliente (★). Deriva del `sync_status`
+    /// local; la app no conoce la decisión del aprobador (no hay GET de pagos para el vendedor).
+    enum ReportedStatus: Equatable { case porEnviar, reportado, conProblema }
+    var reportedStatus: ReportedStatus {
+        switch syncStatus {
+        case .queued: return .porEnviar     // en cola, aún no sube
+        case .synced: return .reportado     // ya en el middleware, pendiente de aprobación
+        case .failed: return .conProblema   // rechazado (4xx) — ver panel de problemas
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case paymentUUID = "payment_uuid"
         case clientCode = "client_code"
