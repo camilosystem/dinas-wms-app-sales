@@ -76,6 +76,48 @@ final class CarteraQueueTests: XCTestCase {
         XCTAssertEqual(enCola?.reportedStatus, .porEnviar, "queued → Por enviar")
     }
 
+    func test_activeInvoiceNumbers_bloqueaFacturasDePagosActivos_yLiberaAlDescartar() throws {
+        let db = try AppDatabase.makeInMemory()
+        // Pago en cola con INV-1.
+        let queued = try makeRepo(db, uuid: "p-q").enqueuePayment(
+            clientCode: "C1", method: .efectivo, amount: 10,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            proposedApplications: [InvoiceApplication(invoiceDocNum: "INV-1", amount: 10)])
+        // Pago reportado (synced) con INV-2 → también bloquea.
+        let synced = try makeRepo(db, uuid: "p-s").enqueuePayment(
+            clientCode: "C1", method: .efectivo, amount: 20,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            proposedApplications: [InvoiceApplication(invoiceDocNum: "INV-2", amount: 20)])
+        try makeRepo(db).markPaymentSynced(paymentUUID: synced.paymentUUID)
+        // Pago de OTRO cliente con INV-9 → no debe contar para C1.
+        try makeRepo(db, uuid: "p-x").enqueuePayment(
+            clientCode: "C2", method: .efectivo, amount: 5,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            proposedApplications: [InvoiceApplication(invoiceDocNum: "INV-9", amount: 5)])
+
+        let repo = CarteraRepository(database: db)
+        XCTAssertEqual(try repo.activeInvoiceNumbers(clientCode: "C1"), ["INV-1", "INV-2"],
+                       "queued y synced bloquean; otro cliente no")
+
+        // Descartar el pago en cola (como desde el panel de Problemas) libera su factura;
+        // el synced (INV-2) sigue bloqueado.
+        try repo.discardPayment(paymentUUID: queued.paymentUUID)
+        XCTAssertEqual(try repo.activeInvoiceNumbers(clientCode: "C1"), ["INV-2"],
+                       "al descartar el queued, INV-1 vuelve a estar disponible")
+    }
+
+    func test_pagoFailed_noBloqueaSuFactura() throws {
+        let db = try AppDatabase.makeInMemory()
+        let p = try makeRepo(db, uuid: "p-f").enqueuePayment(
+            clientCode: "C1", method: .efectivo, amount: 10,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil,
+            proposedApplications: [InvoiceApplication(invoiceDocNum: "INV-1", amount: 10)])
+        try makeRepo(db).markPaymentFailed(paymentUUID: p.paymentUUID, reason: "rechazado")
+
+        XCTAssertTrue(try CarteraRepository(database: db).activeInvoiceNumbers(clientCode: "C1").isEmpty,
+                      "un pago failed no bloquea (se resuelve en el panel de problemas)")
+    }
+
     func test_pagoConFoto_seGuardaSynced_noEntraEnLaCola() throws {
         let db = try AppDatabase.makeInMemory()
         let repo = makeRepo(db)

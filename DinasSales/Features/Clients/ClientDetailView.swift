@@ -119,6 +119,11 @@ struct ClientDetailView: View {
             }
             Text("\(payment.method.label) · \(payment.paymentDate.formatted(date: .abbreviated, time: .omitted))")
                 .font(.caption).foregroundStyle(.secondary)
+            // Facturas incluidas en el pago (invoice_doc_num de las applications guardadas).
+            if !payment.proposedApplications.isEmpty {
+                Text("Facturas: \(payment.proposedApplications.map(\.invoiceDocNum).joined(separator: ", "))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -105,6 +105,22 @@ struct CarteraRepository {
         }
     }
 
+    /// Números de factura ya referenciados en pagos ACTIVOS del cliente — activo = en cola
+    /// (`queued`) o ya reportado sin decisión conocida (`synced`). Se usan para bloquear esas
+    /// facturas en el selector de un pago nuevo (evita reportarlas dos veces). Un pago `failed`
+    /// NO bloquea (se resolverá en el panel de problemas); si se descarta un activo, su factura
+    /// se libera al recomputar.
+    func activeInvoiceNumbers(clientCode: String) throws -> Set<String> {
+        let active = [QueueSyncStatus.queued.rawValue, QueueSyncStatus.synced.rawValue]
+        let payments = try database.dbQueue.read { db in
+            try AccountPayment
+                .filter(Column("client_code") == clientCode)
+                .filter(active.contains(Column("sync_status")))
+                .fetchAll(db)
+        }
+        return Set(payments.flatMap { $0.proposedApplications.map(\.invoiceDocNum) })
+    }
+
     /// Pagos con problema de sincronización (rechazados), para el panel de problemas.
     func failedPayments() throws -> [AccountPayment] {
         try database.dbQueue.read { db in

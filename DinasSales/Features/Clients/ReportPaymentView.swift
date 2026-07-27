@@ -19,6 +19,7 @@ struct ReportPaymentView: View {
 
     @State private var selected: Set<String> = []            // invoice_doc_num marcados
     @State private var appliedAmount: [String: Double] = [:]  // monto propuesto por factura
+    @State private var blockedInvoices: Set<String> = []      // facturas en un pago activo (no seleccionables)
     @State private var amountField = PaymentAmountField()     // monto + auto-relleno desde facturas
     @State private var method: AccountPaymentMethod = .efectivo
     @State private var bank: TransferBankAccount?      // solo TRANSFERENCIA
@@ -85,6 +86,7 @@ struct ReportPaymentView: View {
             }
             .navigationTitle("Reportar pago")
             .navigationBarTitleDisplayModeInlineCompat()
+            .task { loadBlockedInvoices() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -95,28 +97,44 @@ struct ReportPaymentView: View {
         }
     }
 
+    /// Facturas ya incluidas en un pago activo (queued/synced) del cliente → no seleccionables.
+    private func loadBlockedInvoices() {
+        blockedInvoices = (try? CarteraRepository(database: environment.database)
+            .activeInvoiceNumbers(clientCode: client.clientCode)) ?? []
+    }
+
     // MARK: - Filas
 
     private func invoiceRow(_ invoice: OpenInvoiceSummary) -> some View {
+        let blocked = blockedInvoices.contains(invoice.invoiceDocNum)
         let isOn = selected.contains(invoice.invoiceDocNum)
         return VStack(alignment: .leading, spacing: 4) {
             Button {
-                toggle(invoice)
+                if blocked {
+                    errorMessage = "Ya hay un pago reportado con esta factura."
+                } else {
+                    toggle(invoice)
+                }
             } label: {
                 HStack {
-                    Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isOn ? Color.accentColor : .secondary)
+                    Image(systemName: blocked ? "lock.fill" : (isOn ? "checkmark.circle.fill" : "circle"))
+                        .foregroundStyle(blocked ? .secondary : (isOn ? Color.accentColor : .secondary))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Factura \(invoice.invoiceDocNum)").font(.body.weight(.medium))
                         Text("Saldo \(MoneyFormat.string(invoice.amount)) · vence \(invoice.dueDate.formatted(date: .abbreviated, time: .omitted))")
                             .font(.caption).foregroundStyle(.secondary)
+                        if blocked {
+                            Text("Ya incluida en un pago reportado").font(.caption2).foregroundStyle(.orange)
+                        }
                     }
                     Spacer()
                 }
+                .foregroundStyle(blocked ? .secondary : .primary)
+                .opacity(blocked ? 0.6 : 1)
             }
             .buttonStyle(.plain)
 
-            if isOn {
+            if isOn && !blocked {
                 HStack {
                     Text("Aplicar").font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
