@@ -38,6 +38,14 @@ enum CarteraSubmitOutcome: Equatable {
     case blockedNeedsConnection    // con foto y sin señal → se bloquea; el vendedor decide
 }
 
+/// Resultado de intentar cancelar un reporte ya sincronizado (★ v0.21.0).
+enum CarteraCancelOutcome: Equatable {
+    case canceled                  // CANCELADO en el server + marcado local
+    case needsConnection           // sin señal: el registro está en el server, no se puede cancelar offline
+    case alreadyDecided(String)    // 409: la oficina ya lo aprobó/rechazó → no cancelable
+    case failed(String)            // otro 4xx (403 no-dueño, etc.)
+}
+
 /// Orquesta el envío de un reporte de pago según la regla offline (v0.17.7):
 /// - SIN foto → a la cola (`enqueue`), lo sube el `SyncEngine` como las órdenes.
 /// - CON foto → requiere conexión: sube la foto (`POST /evidence-photos`) → crea el pago con esa
@@ -128,6 +136,41 @@ struct CarteraSubmitService {
         } catch {
             // Transitorio: queda en cola CON la URL → el SyncEngine reintenta solo el POST.
             return .pendingUpload
+        }
+    }
+
+    // MARK: - Cancelación (★ v0.21.0)
+
+    /// Cancela un pago ya reportado (synced/PENDIENTE_APROBACION) llamando al endpoint del
+    /// vendedor. Requiere conexión (el registro vive en el server). Un 409 significa que la
+    /// oficina ya lo decidió → no cancelable. Al cancelar, se marca local `.canceled` y su
+    /// factura se libera (deja de contar como activa). Errores transitorios se propagan.
+    func cancelPayment(paymentUUID: String, reason: String?,
+                       isOnline: Bool) async throws -> CarteraCancelOutcome {
+        guard isOnline else { return .needsConnection }
+        do {
+            try await api.cancelAccountPayment(paymentUUID: paymentUUID, reason: reason)
+            try repo.markPaymentCanceled(paymentUUID: paymentUUID)
+            return .canceled
+        } catch let error as APIError where error.serverStatus == 409 {
+            return .alreadyDecided(error.serverMessage ?? "El pago ya fue decidido por la oficina.")
+        } catch let error as APIError where error.isPermanent {
+            return .failed(error.serverMessage ?? "No se pudo cancelar el pago.")
+        }
+    }
+
+    /// Cancela una solicitud de crédito ya reportada. Mismo patrón que `cancelPayment`.
+    func cancelCreditRequest(requestUUID: String, reason: String?,
+                             isOnline: Bool) async throws -> CarteraCancelOutcome {
+        guard isOnline else { return .needsConnection }
+        do {
+            try await api.cancelCreditRequest(requestUUID: requestUUID, reason: reason)
+            try repo.markCreditRequestCanceled(requestUUID: requestUUID)
+            return .canceled
+        } catch let error as APIError where error.serverStatus == 409 {
+            return .alreadyDecided(error.serverMessage ?? "La solicitud ya fue decidida por la oficina.")
+        } catch let error as APIError where error.isPermanent {
+            return .failed(error.serverMessage ?? "No se pudo cancelar la solicitud.")
         }
     }
 }

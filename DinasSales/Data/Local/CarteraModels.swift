@@ -72,6 +72,9 @@ enum QueueSyncStatus: String, Codable, Equatable {
     case queued
     case synced
     case failed
+    /// ★ v0.21.0 — el vendedor canceló su propio reporte (CANCELADO en el server). Ya no cuenta
+    /// como activo: no bloquea facturas y no se reintenta. Distinto de `failed` (rechazo 4xx).
+    case canceled
 }
 
 /// Imputación propuesta a UNA factura (`InvoiceApplication`). Parte de `proposed_applications`.
@@ -118,12 +121,13 @@ struct AccountPayment: Codable, FetchableRecord, PersistableRecord, Identifiable
 
     /// Estado visible para el vendedor en el detalle del cliente (★). Deriva del `sync_status`
     /// local; la app no conoce la decisión del aprobador (no hay GET de pagos para el vendedor).
-    enum ReportedStatus: Equatable { case porEnviar, reportado, conProblema }
+    enum ReportedStatus: Equatable { case porEnviar, reportado, conProblema, cancelado }
     var reportedStatus: ReportedStatus {
         switch syncStatus {
         case .queued: return .porEnviar     // en cola, aún no sube
         case .synced: return .reportado     // ya en el middleware, pendiente de aprobación
         case .failed: return .conProblema   // rechazado (4xx) — ver panel de problemas
+        case .canceled: return .cancelado   // el vendedor lo canceló (CANCELADO)
         }
     }
 
@@ -167,6 +171,17 @@ struct CreditRequest: Codable, FetchableRecord, PersistableRecord, Identifiable,
 
     var id: String { requestUUID }
     static let databaseTableName = "credit_requests"
+
+    /// Estado visible para el vendedor (★), igual que en el pago. Deriva del `sync_status` local.
+    enum ReportedStatus: Equatable { case porEnviar, reportado, conProblema, cancelado }
+    var reportedStatus: ReportedStatus {
+        switch syncStatus {
+        case .queued: return .porEnviar
+        case .synced: return .reportado
+        case .failed: return .conProblema
+        case .canceled: return .cancelado
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case requestUUID = "request_uuid"

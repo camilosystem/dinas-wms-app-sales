@@ -79,6 +79,8 @@ private final class StubSyncAPI: SyncDownAPI, SyncUpAPI, CarteraUploadAPI, @unch
         return CreditRequestAccepted(requestUUID: request.requestUUID,
                                      status: "PENDIENTE_APROBACION", receivedAt: nil)
     }
+    func cancelAccountPayment(paymentUUID: String, reason: String?) async throws {}
+    func cancelCreditRequest(requestUUID: String, reason: String?) async throws {}
 }
 
 /// Servidor simulado que deduplica por `client_uuid` (idempotencia REAL del lado
@@ -119,6 +121,8 @@ private final class IdempotentServerStub: SyncDownAPI, SyncUpAPI, CarteraUploadA
     func uploadEvidencePhoto(imageBase64: String, clientCode: String?) async throws -> String { throw APIError.notImplemented }
     func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted { throw APIError.notImplemented }
     func postCreditRequest(_ request: CreditRequest, lines: [CreditRequestLine]) async throws -> CreditRequestAccepted { throw APIError.notImplemented }
+    func cancelAccountPayment(paymentUUID: String, reason: String?) async throws {}
+    func cancelCreditRequest(requestUUID: String, reason: String?) async throws {}
 }
 
 /// Stub con compuerta: `postOrder` se suspende hasta que el test llame `release()`.
@@ -162,6 +166,8 @@ private actor GatedUploadAPI: SyncDownAPI, SyncUpAPI, CarteraUploadAPI {
     func uploadEvidencePhoto(imageBase64: String, clientCode: String?) async throws -> String { throw APIError.notImplemented }
     func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted { throw APIError.notImplemented }
     func postCreditRequest(_ request: CreditRequest, lines: [CreditRequestLine]) async throws -> CreditRequestAccepted { throw APIError.notImplemented }
+    func cancelAccountPayment(paymentUUID: String, reason: String?) async throws {}
+    func cancelCreditRequest(requestUUID: String, reason: String?) async throws {}
 }
 
 @MainActor

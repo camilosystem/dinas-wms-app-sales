@@ -27,6 +27,18 @@ private final class SubmitStubAPI: CarteraUploadAPI, @unchecked Sendable {
         postedLineCounts.append(lines.count)
         return CreditRequestAccepted(requestUUID: request.requestUUID, status: "PENDIENTE", receivedAt: nil)
     }
+
+    var cancelError: Error?
+    private(set) var canceledPayments: [String] = []
+    private(set) var canceledRequests: [String] = []
+    func cancelAccountPayment(paymentUUID: String, reason: String?) async throws {
+        if let cancelError { throw cancelError }
+        canceledPayments.append(paymentUUID)
+    }
+    func cancelCreditRequest(requestUUID: String, reason: String?) async throws {
+        if let cancelError { throw cancelError }
+        canceledRequests.append(requestUUID)
+    }
 }
 
 final class CarteraSubmitTests: XCTestCase {
@@ -190,6 +202,75 @@ final class CarteraSubmitTests: XCTestCase {
         XCTAssertEqual(outcome, .pendingUpload)
         XCTAssertEqual(api.uploadedPhotos, 1, "la foto se subió una sola vez")
         XCTAssertEqual(try repo.pendingCreditRequests().first?.evidenceImageURL, "https://mid/e/1.jpg")
+    }
+
+    // MARK: - Cancelación (v0.21.0)
+
+    private func reportedPaymentRepo(_ db: AppDatabase, uuid: String, invoice: String?) throws -> CarteraRepository {
+        var repo = CarteraRepository(database: db); repo.makeUUID = { uuid }
+        let apps = invoice.map { [InvoiceApplication(invoiceDocNum: $0, amount: 50)] } ?? []
+        _ = try repo.enqueuePayment(clientCode: "C1", method: .efectivo, amount: 50,
+            paymentDate: Date(timeIntervalSince1970: 0), comments: nil, proposedApplications: apps)
+        try repo.markPaymentSynced(paymentUUID: uuid)   // reportado (synced)
+        return repo
+    }
+
+    func test_cancelPayment_online_cancelaEnServer_marcaCanceled_yLiberaFactura() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        let repo = try reportedPaymentRepo(db, uuid: "pay-x", invoice: "INV-1")
+        XCTAssertEqual(try repo.activeInvoiceNumbers(clientCode: "C1"), ["INV-1"])
+
+        let outcome = try await CarteraSubmitService(repo: repo, api: api)
+            .cancelPayment(paymentUUID: "pay-x", reason: nil, isOnline: true)
+
+        XCTAssertEqual(outcome, .canceled)
+        XCTAssertEqual(api.canceledPayments, ["pay-x"])
+        let stored = try await db.dbQueue.read { try AccountPayment.fetchOne($0, key: "pay-x") }
+        XCTAssertEqual(stored?.reportedStatus, .cancelado)
+        XCTAssertTrue(try repo.activeInvoiceNumbers(clientCode: "C1").isEmpty,
+                      "CANCELADO libera la factura, igual que RECHAZADO/descartado")
+    }
+
+    func test_cancelPayment_offline_noLlamaServer_niCambiaEstado() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        let repo = try reportedPaymentRepo(db, uuid: "pay-y", invoice: nil)
+
+        let outcome = try await CarteraSubmitService(repo: repo, api: api)
+            .cancelPayment(paymentUUID: "pay-y", reason: nil, isOnline: false)
+
+        XCTAssertEqual(outcome, .needsConnection)
+        XCTAssertEqual(api.canceledPayments, [])
+        let stored = try await db.dbQueue.read { try AccountPayment.fetchOne($0, key: "pay-y") }
+        XCTAssertEqual(stored?.syncStatus, .synced, "sigue reportado")
+    }
+
+    func test_cancelPayment_409_yaDecidido_noMarcaCanceled() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        api.cancelError = APIError.server(status: 409, message: "El pago ya fue decidido.")
+        let repo = try reportedPaymentRepo(db, uuid: "pay-z", invoice: nil)
+
+        let outcome = try await CarteraSubmitService(repo: repo, api: api)
+            .cancelPayment(paymentUUID: "pay-z", reason: nil, isOnline: true)
+
+        XCTAssertEqual(outcome, .alreadyDecided("El pago ya fue decidido."))
+        let stored = try await db.dbQueue.read { try AccountPayment.fetchOne($0, key: "pay-z") }
+        XCTAssertEqual(stored?.syncStatus, .synced, "un 409 no marca canceled localmente")
+    }
+
+    func test_cancelCreditRequest_online_marcaCanceled() async throws {
+        let db = try AppDatabase.makeInMemory(); let api = SubmitStubAPI()
+        var repo = CarteraRepository(database: db); repo.makeUUID = { "req-x" }
+        _ = try repo.enqueueCreditRequest(clientCode: "C1", mode: .sinItems, reason: .mistake,
+            manualAmount: 10, invoiceDocNum: nil, comments: nil, lines: [])
+        try repo.markCreditRequestSynced(requestUUID: "req-x")
+
+        let outcome = try await CarteraSubmitService(repo: repo, api: api)
+            .cancelCreditRequest(requestUUID: "req-x", reason: "me equivoqué", isOnline: true)
+
+        XCTAssertEqual(outcome, .canceled)
+        XCTAssertEqual(api.canceledRequests, ["req-x"])
+        let stored = try await db.dbQueue.read { try CreditRequest.fetchOne($0, key: "req-x") }
+        XCTAssertEqual(stored?.reportedStatus, .cancelado)
     }
 
     func test_credito_conFoto_4xx_quedaFailedConMotivo() async throws {

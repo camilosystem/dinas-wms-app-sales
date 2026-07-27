@@ -26,6 +26,8 @@ private final class CarteraStubAPI: SyncDownAPI, SyncUpAPI, CarteraUploadAPI, @u
         postedRequests.append(request.requestUUID)
         return CreditRequestAccepted(requestUUID: request.requestUUID, status: "PENDIENTE_APROBACION", receivedAt: nil)
     }
+    func cancelAccountPayment(paymentUUID: String, reason: String?) async throws {}
+    func cancelCreditRequest(requestUUID: String, reason: String?) async throws {}
 }
 
 @MainActor

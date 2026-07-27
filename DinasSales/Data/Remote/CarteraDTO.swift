@@ -140,6 +140,20 @@ struct CreditRequestCreateDTO: Encodable {
     }
 }
 
+// MARK: - Cancelación (★ v0.21.0)
+
+/// Cuerpo (opcional) de `POST …/cancel`: motivo opcional del vendedor. Si `reason` es nil, el
+/// encoder omite la clave → body `{}`, válido porque el requestBody del contrato es opcional.
+struct CarteraCancelDTO: Encodable {
+    let reason: String?
+}
+
+/// Respuesta de `…/cancel` (AccountPaymentDetail / CreditRequestDetail). Solo nos importa el
+/// estado resultante (CANCELADO); el resto del detalle no lo usa la app.
+struct CarteraCancelResult: Decodable {
+    let status: String?
+}
+
 /// `CreditRequestAccepted` — respuesta del POST (idempotente por `request_uuid`).
 struct CreditRequestAccepted: Decodable {
     let requestUUID: String

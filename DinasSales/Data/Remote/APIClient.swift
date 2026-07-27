@@ -39,6 +39,11 @@ protocol CarteraUploadAPI: Sendable {
     func postAccountPayment(_ payment: AccountPayment) async throws -> AccountPaymentAccepted
     /// `POST /credit-requests`. Idempotente por `request_uuid`. `lines` solo en CON_ITEMS.
     func postCreditRequest(_ request: CreditRequest, lines: [CreditRequestLine]) async throws -> CreditRequestAccepted
+    /// `POST /account-payments/{uuid}/cancel` (★ v0.21.0, rol VENDEDOR). Cancela un pago propio
+    /// PENDIENTE_APROBACION → CANCELADO. Motivo opcional. 409 si ya fue decidido; 403 si no es dueño.
+    func cancelAccountPayment(paymentUUID: String, reason: String?) async throws
+    /// `POST /credit-requests/{uuid}/cancel` (★ v0.21.0, rol VENDEDOR). Mismo patrón.
+    func cancelCreditRequest(requestUUID: String, reason: String?) async throws
 }
 
 /// Cliente HTTP contra el middleware, según `dinas-wms-contracts/openapi.yaml`.
@@ -147,6 +152,20 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI, CarteraUploadAPI {
         let body = try JSONCoding.encoder.encode(AccountPaymentCreateDTO(payment))
         let request = try makeRequest(path: "account-payments", method: "POST", body: body)
         return try await send(request, decode: AccountPaymentAccepted.self)
+    }
+
+    func cancelAccountPayment(paymentUUID: String, reason: String?) async throws {
+        let body = try JSONCoding.encoder.encode(CarteraCancelDTO(reason: reason))
+        let request = try makeRequest(path: "account-payments/\(paymentUUID)/cancel",
+                                      method: "POST", body: body)
+        _ = try await send(request, decode: CarteraCancelResult.self)
+    }
+
+    func cancelCreditRequest(requestUUID: String, reason: String?) async throws {
+        let body = try JSONCoding.encoder.encode(CarteraCancelDTO(reason: reason))
+        let request = try makeRequest(path: "credit-requests/\(requestUUID)/cancel",
+                                      method: "POST", body: body)
+        _ = try await send(request, decode: CarteraCancelResult.self)
     }
 
     /// `POST /credit-requests`. Idempotente por `request_uuid`.

@@ -78,6 +78,17 @@ struct CarteraRepository {
         }
     }
 
+    /// Marca un pago como CANCELADO (★ v0.21.0) tras cancelarlo en el server. Deja de ser activo:
+    /// ya no bloquea facturas ni se reintenta.
+    func markPaymentCanceled(paymentUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard var payment = try AccountPayment.fetchOne(db, key: paymentUUID) else { return }
+            payment.syncStatus = .canceled
+            payment.failureReason = nil
+            try payment.update(db)
+        }
+    }
+
     /// Reintenta un pago fallido: lo devuelve a la cola (`queued`) para el próximo sync.
     func retryPayment(paymentUUID: String) throws {
         try database.dbQueue.write { db in
@@ -193,6 +204,27 @@ struct CarteraRepository {
             guard var request = try CreditRequest.fetchOne(db, key: requestUUID) else { return }
             request.syncStatus = .failed
             request.failureReason = reason
+            try request.update(db)
+        }
+    }
+
+    /// Todas las solicitudes de crédito de un cliente (cualquier estado), más recientes primero,
+    /// para mostrarlas con su estado en el detalle del cliente.
+    func creditRequests(clientCode: String) throws -> [CreditRequest] {
+        try database.dbQueue.read { db in
+            try CreditRequest
+                .filter(Column("client_code") == clientCode)
+                .order(Column("created_at").desc)
+                .fetchAll(db)
+        }
+    }
+
+    /// Marca una solicitud como CANCELADA (★ v0.21.0) tras cancelarla en el server.
+    func markCreditRequestCanceled(requestUUID: String) throws {
+        try database.dbQueue.write { db in
+            guard var request = try CreditRequest.fetchOne(db, key: requestUUID) else { return }
+            request.syncStatus = .canceled
+            request.failureReason = nil
             try request.update(db)
         }
     }
