@@ -19,7 +19,7 @@ struct ReportPaymentView: View {
 
     @State private var selected: Set<String> = []            // invoice_doc_num marcados
     @State private var appliedAmount: [String: Double] = [:]  // monto propuesto por factura
-    @State private var amount: Double = 0
+    @State private var amountField = PaymentAmountField()     // monto + auto-relleno desde facturas
     @State private var method: AccountPaymentMethod = .efectivo
     @State private var bank: TransferBankAccount?      // solo TRANSFERENCIA
     @State private var checkNumber = ""                 // solo CHEQUE
@@ -89,7 +89,7 @@ struct ReportPaymentView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Reportar") { Task { await submit() } }
-                        .disabled(amount <= 0 || !methodDetailsValid || submitting)
+                        .disabled(amountField.amount <= 0 || !methodDetailsValid || submitting)
                 }
             }
         }
@@ -138,7 +138,12 @@ struct ReportPaymentView: View {
         HStack {
             Text("Monto pagado")
             Spacer()
-            TextField("0", value: $amount, format: .number)
+            // El `set` marca el monto como editado a mano → deja de auto-poblarse. El auto-relleno
+            // asigna `amountField` por otro camino (selectionChanged), sin pasar por este setter.
+            TextField("0", value: Binding(
+                get: { amountField.amount },
+                set: { amountField.userEdited($0) }
+            ), format: .number)
                 .multilineTextAlignment(.trailing).frame(width: 120)
                 .textFieldStyle(.roundedBorder)
             #if os(iOS)
@@ -173,6 +178,16 @@ struct ReportPaymentView: View {
                 appliedAmount[invoice.invoiceDocNum] = invoice.amount
             }
         }
+        // Auto-puebla "Monto pagado" con la suma de lo seleccionado (salvo que ya se editó a mano).
+        amountField.selectionChanged(selectedSum: selectedInvoicesSum)
+    }
+
+    /// Suma de las facturas seleccionadas, usando el monto propuesto por factura (que por defecto
+    /// es el saldo). Es lo que se auto-puebla en "Monto pagado".
+    private var selectedInvoicesSum: Double {
+        client.openInvoices
+            .filter { selected.contains($0.invoiceDocNum) }
+            .reduce(0) { $0 + (appliedAmount[$1.invoiceDocNum] ?? $1.amount) }
     }
 
     /// Trim de los datos de cheque (se validan/envían sin espacios).
@@ -200,7 +215,7 @@ struct ReportPaymentView: View {
         // Solo se adjunta el dato del método correspondiente; el resto queda nil (el contrato exige
         // null en los otros métodos). La UI condicional ya garantiza que no se mezclen.
         let draft = PaymentDraft(
-            clientCode: client.clientCode, method: method, amount: amount, paymentDate: paymentDate,
+            clientCode: client.clientCode, method: method, amount: amountField.amount, paymentDate: paymentDate,
             comments: comments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : comments,
             proposedApplications: apps,
             transferBankAccount: method == .transferencia ? bank : nil,
