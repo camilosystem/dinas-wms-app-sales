@@ -29,6 +29,7 @@ struct HomeView: View {
     @EnvironmentObject private var sync: SyncEngine
     @EnvironmentObject private var network: NetworkMonitor
     @EnvironmentObject private var pendingOrders: PendingOrdersObserver
+    @EnvironmentObject private var pendingCartera: PendingCarteraObserver
     @EnvironmentObject private var auth: AuthSession
 
     @State private var showReauth = false
@@ -58,6 +59,9 @@ struct HomeView: View {
                 // Aviso persistente de pendientes: el vendedor es responsable de sincronizar.
                 if pendingOrders.count > 0 {
                     pendingCallout
+                }
+                if pendingCartera.total > 0 {
+                    carteraCallout
                 }
 
                 if let feedback = sync.feedback {
@@ -154,6 +158,32 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
         .background(Color.orange.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Tarjeta naranja cuando hay movimientos de cartera (pagos / solicitudes de crédito) en cola.
+    private var carteraCallout: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+            Text(carteraPendingText).font(.callout.weight(.semibold))
+        }
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Frase según cuántos pagos y/o solicitudes de crédito están sin enviar.
+    private var carteraPendingText: String {
+        let p = pendingCartera.paymentsCount, c = pendingCartera.creditsCount
+        let pagos = p == 1 ? "1 pago" : "\(p) pagos"
+        let creditos = c == 1 ? "1 solicitud de crédito" : "\(c) solicitudes de crédito"
+        switch (p > 0, c > 0) {
+        case (true, true):  return "Tienes \(pagos) y \(creditos) sin enviar"
+        case (true, false): return "Tienes \(pagos) sin enviar"
+        default:            return "Tienes \(creditos) sin enviar"
+        }
     }
 
     /// Texto de la última sincronización (siempre visible; el estado offline va aparte).

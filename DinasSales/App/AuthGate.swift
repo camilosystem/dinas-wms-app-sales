@@ -26,6 +26,7 @@ struct AuthGate: View {
                 case .signedIn:
                     RootView()
                         .environmentObject(environment.pendingOrders)
+                        .environmentObject(environment.pendingCartera)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

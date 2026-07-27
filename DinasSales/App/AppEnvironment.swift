@@ -14,6 +14,7 @@ final class AppEnvironment: ObservableObject {
     let sync: SyncEngine
     let auth: AuthSession
     let pendingOrders: PendingOrdersObserver
+    let pendingCartera: PendingCarteraObserver
     let network: NetworkMonitor
 
     /// Usuario cuyo archivo de base está abierto ahora (para detectar el cambio de usuario).
@@ -52,6 +53,9 @@ final class AppEnvironment: ObservableObject {
         let pendingOrders = PendingOrdersObserver(database: database)
         self.pendingOrders = pendingOrders
 
+        let pendingCartera = PendingCarteraObserver(database: database)
+        self.pendingCartera = pendingCartera
+
         // Conectividad re-evaluada activamente: el monitor SONDEA al middleware (no solo mira la
         // interfaz de red) y se recupera solo o con el botón "Reintentar". NO dispara sync.
         self.network = NetworkMonitor(probe: { await api.checkReachability() })
@@ -60,13 +64,14 @@ final class AppEnvironment: ObservableObject {
         // observador (aislamiento estructural; el login offline solo reactiva al mismo usuario);
         // (2) resetea las marcas de sync para que la próxima bajada sea completa y reconcilie.
         // Va al final: capturar `self` exige que todas las props estén inicializadas.
-        auth.onOnlineLogin = { [weak self, weak sync, weak pendingOrders] in
+        auth.onOnlineLogin = { [weak self, weak sync, weak pendingOrders, weak pendingCartera] in
             if let self {
                 let user = (try? sessionStore.read())?.username
                 if user != self.currentDBUser {
                     self.currentDBUser = user
                     try? self.database.reopen(forUser: user)
                     pendingOrders?.restart()
+                    pendingCartera?.restart()
                 }
             }
             sync?.resetWatermarks()
