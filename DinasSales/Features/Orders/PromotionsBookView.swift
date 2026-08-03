@@ -261,7 +261,11 @@ struct PromotionDetailView: View {
             lines.append(PromotionLineInput(itemCode: item.itemCode, quantity: qty,
                                             discountPct: item.discountPct))
         }
-        onConfirm(detail.title, UUID().uuidString, lines)
+        // El promotion_group_id es el PROPIO promotion_id: el middleware valida el bloque contra
+        // la definición de la promoción con ese id (verificado en vivo — un UUID nuevo da 400
+        // "no corresponde a ninguna promoción"). El contrato dice "UUID nuevo por bloque", pero el
+        // middleware exige el promotion_id; se elevó al Arquitecto para alinear el texto.
+        onConfirm(detail.title, detail.promotionId, lines)
         dismiss()
     }
 
