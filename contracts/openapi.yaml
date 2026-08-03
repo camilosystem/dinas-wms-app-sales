@@ -1,9 +1,242 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.21.0
+  version: 0.28.0
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.28.0 — MÓDULO DE PROMOCIONES
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Módulo completo de promociones — desde la gestión por el analista
+      hasta el libro del vendedor y la integración al carrito de venta.
+
+      NUEVO ROL: ANALISTA_COMERCIAL — puede crear/editar/activar/desactivar
+      promociones. No tiene acceso a logística, aprobaciones, ni cartera.
+
+      GESTIÓN (ANALISTA_COMERCIAL o ADMIN):
+      - GET  /admin/promotions
+      - POST /admin/promotions (empieza INACTIVE)
+      - GET  /admin/promotions/{id}
+      - PUT  /admin/promotions/{id} (solo si está INACTIVE)
+      - POST /admin/promotions/{id}/activate
+      - POST /admin/promotions/{id}/deactivate
+
+      LIBRO DEL VENDEDOR (VENDEDOR o ANALISTA_COMERCIAL):
+      - GET /promotions — solo las ACTIVE, vigentes (valid_from ≤ hoy ≤
+        valid_to), y asignadas al vendedor autenticado.
+        Búsqueda ?q= por título, código de ítem, o nombre de ítem.
+      - GET /promotions/{id} — 403 si no está asignada al vendedor.
+
+      CARRITO:
+      - OrderLine gana promotion_group_id (nullable UUID) — todas las
+        líneas del mismo bloque de promoción (condición + beneficio)
+        comparten el mismo UUID. El servidor valida que el bloque sea
+        completo y rechaza (400) pedidos donde se eliminen solo ALGUNAS
+        líneas de un mismo grupo (el bloque es indivisible — se agrega
+        y se elimina en conjunto).
+
+      TIPOS DE PROMOCIÓN:
+      - FREE_ITEMS: los ítems de beneficio tienen discount_pct=100.
+      - DISCOUNTED_ITEMS: cada ítem de beneficio tiene su propio
+        discount_pct definido por el analista.
+
+      VIGENCIA: toda promoción tiene valid_from/valid_to (fechas de inicio
+      y fin). Se activa/desactiva manualmente — un analista no puede
+      activar una promoción con valid_to ya vencida.
+
+      RESTRICCIÓN POR VENDEDOR: cada promoción lleva una lista de
+      salesperson_codes autorizados — un vendedor solo ve las que le
+      fueron asignadas explícitamente.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.27.0 — CONTROL MANUAL DE RECONCILIACIÓN ANTES DE FACTURAR
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Reemplaza el disparo automático de ORDER_INVOICE en ALISTADO
+      (v0.22.0) por un flujo manual con chequeo de stock previo:
+
+      - GET /admin/trucks/{truck_id}/invoice-readiness — compara demanda
+        agregada del camión (todas las órdenes) contra stock real
+        (vw_WMS_Stock, almacén 01). Persiste checked_at/is_clean en el
+        camión — es la base de lo que exige el envío.
+      - POST /admin/trucks/{truck_id}/orders/{order_uuid}/items/{item_code}/reduce-allocation
+        — reducción DIRIGIDA (solo esa orden+ítem, nada más del camión),
+        reason OBLIGATORIO para auditoría.
+      - POST /admin/trucks/{truck_id}/send-to-invoicing — reemplaza el
+        disparo automático. EXIGE invoice-readiness limpio y de los
+        últimos 5 minutos (409 si no). Aquí, no en ALISTADO, se calcula
+        y persiste bin_allocations.
+
+      El disparo automático original (RefreshAggregateStatusAsync,
+      commit c3921d7) debe ELIMINARSE — un camión en ALISTADO ya no
+      encola nada por sí solo.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.26.0 — ASIGNACIÓN DE BIN POR LÍNEA (ORDER_INVOICE)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      La primera factura real fue rechazada por SAP (400, code -10:
+      "Fully allocate item X to bin locations") — el almacén 01 exige
+      DocumentLinesBinAllocations cuando un ítem tiene más de un bin
+      (AutoAllocOnIssue=whsBinSingleChoiceOnly). Investigación confirmó que
+      el Wave Picking recoge por CAMIÓN, no por orden — a nivel de línea
+      individual no existe (ni puede existir) el dato de qué bin específico
+      recibió cada cliente, solo a nivel de camión agregado.
+
+      bin_allocations (por línea): cómo repartir la cantidad entre los bins
+      reales. Un solo bin → hecho directo, approximate=false. Más de un
+      bin → repartido determinísticamente (fill-first) entre las órdenes
+      que comparten ese ítem+camión, approximate=true — exacto en el
+      agregado del camión, aproximado por línea individual (no hay otra
+      opción físicamente posible dado cómo funciona el Wave Picking).
+
+      Calculado y PERSISTIDO una sola vez al encolar la tarea (misma
+      transacción atómica que crea todas las tareas del camión — el
+      conjunto de órdenes ya está congelado desde antes de ALISTADO, así
+      que no hay órdenes tardías ni condición de carrera entre tareas).
+      GET /pending nunca recalcula, solo lee lo guardado.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.25.0 — TOTALES ESPERADOS EN EL SNAPSHOT DE ORDER_INVOICE
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Vacío encontrado al leer la primera tarea real de ORDER_INVOICE en la
+      cola: el snapshot no traía ningún total (ni por línea, ni por
+      documento). Sin eso, el sincronizador no tiene contra qué comparar el
+      DocTotal real que devuelva SAP tras crear la factura — la salvaguarda
+      contra divergencias de redondeo (SAP calcula LineTotal con el precio
+      con descuento SIN redondear antes de multiplicar, verificado con
+      datos reales) se quedaba sin contraparte.
+
+      - expected_line_total (por línea): quantity × unit_price ×
+        (1 - discount_pct/100), calculado con la misma fórmula exacta que
+        usa SAP — no redondear antes de multiplicar.
+      - expected_doc_total (a nivel de order_invoice): suma de todos los
+        expected_line_total.
+
+      El sincronizador compara esto contra lo que SAP devuelva de verdad;
+      si no coincide, lo reporta como advertencia, nunca lo fuerza a cuadrar
+      ni lo trata como error bloqueante.
+
+      Nota de corrección (no es cambio de contrato, es aclaración): el
+      campo "invoice_uuid" mencionado en descripciones anteriores nunca
+      existió — el snapshot solo tiene order_uuid (= document_uuid de la
+      tarea). Usar order_uuid= como prefijo en Comments, no invoice_uuid=.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.24.0 — CREAR CUENTAS DE BODEGUERO/DRIVER DESDE CERO
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Vacío encontrado en medio de una prueba real (llevar un pedido por
+      todo el ciclo de picking para Órdenes de Venta → Facturas): un
+      ambiente recién migrado/limpio (droplet o cualquier middleware
+      nuevo) solo tiene el admin del bootstrap — no hay bodegueros ni
+      drivers para asignar/completar un picking.
+
+      A diferencia de /admin/salespersons/provision (que ACTIVA una
+      cuenta para alguien que ya existe como SlpCode real en SAP),
+      BODEGUERO y DRIVER no son un concepto de SAP — son personal interno
+      del WMS, sin ningún espejo contra el cual validar.
+
+      - GET /admin/staff — lista el personal ya creado (Role IN
+        (BODEGUERO, DRIVER)), directo de la tabla de login, sin espejo.
+      - POST /admin/staff/provision — crea una cuenta desde cero
+        (username, password, display_name, role ∈ {BODEGUERO, DRIVER}).
+        Sin salesperson_code, sin vínculo a SAP (Code queda null).
+
+      Vive en la MISMA pantalla "Gestionar Usuarios" del Dashboard, como
+      sección aparte de la de vendedores — decisión explícita de Camilo
+      de no crear una pantalla nueva para esto.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.23.0 — REFRESCO DEL ESPEJO A DEMANDA (alcance mínimo)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Parte del diseño de "Órdenes de Venta → Facturas": antes de mandar a
+      facturar, el jefe de bodega necesita un chequeo de stock real contra
+      SAP (vw_WMS_Stock), y el espejo local hoy solo se refresca cada 15
+      min (SapRefreshBackgroundService, dentro del propio middleware — NO
+      es el sincronizador dinas-wms-sap-sync, son dos mecanismos
+      completamente separados y en direcciones opuestas: este refresco
+      lee de SAP hacia el WMS; el sincronizador escribe del WMS hacia SAP).
+
+      POST /admin/sap-refresh/trigger — REQUIERE ADMIN. Llama directamente
+      al mismo SapMirrorRefreshService que ya usa el timer, sin lógica
+      nueva. Si ya hay un refresco en curso, espera ese y devuelve su
+      resultado (nunca dos refrescos en paralelo). Síncrono.
+
+      Alcance deliberadamente MÍNIMO — decidido así con Camilo para no
+      estancar el bloque de facturación: NO incluye configuración de
+      intervalo, NI un panel de control. Eso queda como su propio bloque
+      futuro, cubriendo también el sincronizador de envíos (que hoy solo
+      se puede forzar con un archivo centinela local en su propia máquina).
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.22.0 — ÓRDENES DE VENTA → FACTURAS (ORDER_INVOICE)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Primer bloque nuevo de la cola genérica de integración SAP desde
+      account-payments/credit-requests — document_type "ORDER_INVOICE"
+      (string libre, sin migración, mismo principio de siempre).
+
+      - GET /admin/sap-sync/order-invoices/pending
+      - POST /admin/sap-sync/order-invoices/{task_id}/result
+
+      Diseño confirmado tras investigación real del modelo de datos
+      (contradice una suposición inicial — quedó documentado en
+      sap-integration.md):
+      - La orden del WMS NO tiene ninguna Orden de Venta (ORDR) previa en
+        SAP. La Factura es standalone, el PRIMER documento que esta
+        transacción toca en SAP.
+      - Disparo: automático, cuando el camión de la orden llega a
+        TruckStatuses.ALISTADO (Truck.AlistadoAtUtc) — no hay aprobación
+        de negocio que lo encole, por eso este payload no tiene
+        decided_by/decided_at.
+      - Cantidad por línea: SUM(PalletAssignment.Quantity) por
+        OrderUuid+ItemCode — NUNCA OrderLine.Quantity (la pedida original).
+        Líneas sin nada repartido (faltante total) se excluyen del
+        payload; si una orden entera no tiene ninguna línea repartida, no
+        se encola ninguna tarea para ella.
+      - Precio por línea: OrderLine.UnitPrice + LineDiscountPct,
+        congelados al tomar el pedido — el WMS nunca los revalida, y SAP
+        debe obedecerlos tal cual (nunca resolverlos por su cuenta).
+        unit_price=0 y descuento=100% son válidos (promociones), no errores.
+
+    ★ QUÉ NO INCLUYE TODAVÍA
+      El payload real de Service Layer para crear la Factura (POST a
+      Invoices) — eso requiere descubrimiento real vía $metadata, igual
+      disciplina que con IncomingPayments. No asumido ni diseñado aquí.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.21.1 — APROVISIONAR VENDEDORES REALES (LOGIN)
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      Vacío de contrato encontrado durante la validación de producción: la
+      sincronización real de SAP llena SapSalespersons (espejo de solo
+      lectura), pero eso NUNCA crea cuentas de login reales — el bootstrap
+      solo crea UN admin. En producción, ningún vendedor podía entrar,
+      aunque sus datos ya estuvieran sincronizados desde SAP.
+
+      - GET /admin/sap-salespersons — REQUIERE ADMIN. Lee SapSalespersons
+        (no la tabla de login), marca has_login_account por fila, para que
+        la pantalla "Gestionar Usuarios" del Dashboard muestre quién falta
+        por aprovisionar.
+      - POST /admin/salespersons/provision — REQUIERE ADMIN. Crea la
+        cuenta de login real (tabla Salespersons) para un salesperson_code
+        que DEBE existir en SapSalespersons (400 si no). 409 si ese código
+        ya tiene cuenta. El ADMIN define la contraseña inicial manualmente
+        (mínimo 8 caracteres) — no autogenerada. display_name viene del
+        espejo SAP, no se recibe en el body.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.21.0 — VENDEDOR CANCELA SU PROPIO REPORTE (CANCELADO)
@@ -1014,6 +1247,43 @@ paths:
               schema: { $ref: '#/components/schemas/LoginResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.23.0 — DISPARO A DEMANDA DEL REFRESCO DEL ESPEJO
+  # ═══════════════════════════════════════════════════════════════
+  # Alcance MÍNIMO a propósito: solo dispara el mismo refresco que ya
+  # corre cada 15 min (SapRefreshBackgroundService/SapMirrorRefreshService),
+  # sin agregar configuración de intervalo ni panel — eso es un bloque
+  # aparte, más adelante. Este endpoint existe puntualmente para que el
+  # jefe de bodega pueda pedir datos frescos de stock justo antes del
+  # chequeo de reconciliación en Órdenes de Venta → Facturas.
+
+  /admin/sap-refresh/trigger:
+    post:
+      tags: [sap-refresh]
+      summary: Dispara el refresco del espejo SAP ahora, sin esperar el ciclo de 15 min
+      description: >
+        ★ v0.23.0. REQUIERE rol ADMIN. Llama directamente al mismo
+        SapMirrorRefreshService que usa el timer de 15 min
+        (SapRefreshBackgroundService) — no es lógica nueva, es el mismo
+        código expuesto también bajo demanda. Si ya hay un refresco en
+        curso (disparado por el timer o por otra llamada a este mismo
+        endpoint), esta llamada espera a que termine ese y devuelve su
+        resultado, en vez de correr dos refrescos en paralelo. Síncrono:
+        la respuesta llega cuando el refresco ya terminó, no antes.
+      responses:
+        '200':
+          description: Refresco completado (o el de otra llamada en curso, si coincidieron)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SapRefreshResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502':
+          description: El refresco falló contra SAP (ej. conexión caída) — ver source_results para el detalle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SapRefreshResult' }
+
   /sync/catalog:
     get:
       tags: [sync-down]
@@ -1711,7 +1981,424 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.22.0 — ÓRDENES DE VENTA → FACTURAS (ORDER_INVOICE)
+  # ═══════════════════════════════════════════════════════════════
+  # Igual patrón que account-payments/credit-requests, pero con un origen
+  # de disparo distinto: no hay aprobación de negocio que encole la tarea
+  # — se encola automáticamente cuando un camión llega a ALISTADO
+  # (Truck.AlistadoAtUtc), una orden por cada Order APROBADA del camión
+  # que SÍ tenga filas en PalletAssignment (las de faltante total no
+  # generan factura). La factura es standalone — no referencia ninguna
+  # Orden de Venta base en SAP (no existe tal documento).
+
+  /admin/sap-sync/order-invoices/pending:
+    get:
+      tags: [sap-sync]
+      summary: Tareas de integración SAP pendientes — facturas de órdenes ya pickeadas
+      description: >
+        ★ v0.22.0. REQUIERE rol ADMIN. Mismo criterio de elegibilidad que
+        pagos/créditos (status PENDIENTE o ERROR; `forced` informativo).
+      responses:
+        '200':
+          description: Lista de tareas pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items: { $ref: '#/components/schemas/SapOrderInvoiceSyncTask' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/sap-sync/order-invoices/{task_id}/result:
+    post:
+      tags: [sap-sync]
+      summary: Reportar el resultado de integrar una factura de orden a SAP
+      description: >
+        ★ v0.22.0. REQUIERE rol ADMIN. Actualiza ÚNICAMENTE
+        SapIntegrationTask — este bloque no tiene todavía un "AccountPayment"
+        equivalente que actualizar (la orden en sí no cambia de estado por
+        esto; si en el futuro se decide reflejar el resultado en la orden,
+        es un cambio aparte). 409 si la tarea ya está en estado INTEGRADO.
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SapSyncResultReport' }
+      responses:
+        '200':
+          description: Resultado registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SapOrderInvoiceSyncTask' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: La tarea ya está INTEGRADO
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.27.0 — CONTROL MANUAL DE RECONCILIACIÓN ANTES DE FACTURAR
+  # ═══════════════════════════════════════════════════════════════
+  # Reemplaza el disparo automático de ORDER_INVOICE en ALISTADO (que
+  # existía desde v0.22.0) — ahora el jefe de bodega debe: (1) correr el
+  # chequeo de stock, (2) resolver discrepancias con reducciones
+  # dirigidas si las hay, (3) volver a chequear, (4) enviar a facturar
+  # solo cuando el último chequeo salió limpio y reciente. El disparo
+  # automático en RefreshAggregateStatusAsync debe eliminarse — un
+  # camión en ALISTADO ya NO encola nada por sí solo.
+
+  /admin/trucks/{truck_id}/invoice-readiness:
+    get:
+      tags: [dispatch-admin]
+      summary: Chequeo de stock antes de enviar a facturación — compara demanda agregada del camión contra SAP
+      description: >
+        ★ v0.27.0. REQUIERE ADMIN. Solo aplica a camiones en ALISTADO.
+        Por cada ítem con demanda en el camión (suma de PalletAssignment
+        de TODAS sus órdenes APROBADA), compara contra el stock real del
+        almacén 01 (vw_WMS_Stock — usa POST /admin/sap-refresh/trigger
+        primero si quieres datos frescos, esto NO refresca por su cuenta).
+        Cada llamada PERSISTE su resultado en el camión
+        (Truck.LastInvoiceReadinessCheckAt/Clean) — es lo que
+        POST .../send-to-invoicing exige antes de dejar enviar.
+      parameters:
+        - name: truck_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Resultado del chequeo (limpio o con discrepancias)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TruckInvoiceReadiness' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El camión no está en ALISTADO
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/trucks/{truck_id}/orders/{order_uuid}/items/{item_code}/reduce-allocation:
+    post:
+      tags: [dispatch-admin]
+      summary: Reducción dirigida — descompletar un ítem de UNA orden específica para resolver una discrepancia
+      description: >
+        ★ v0.27.0. REQUIERE ADMIN. Reduce ÚNICAMENTE
+        PalletAssignment.Quantity de esta orden+ítem — nada más del
+        camión, del lane, ni de otras órdenes se toca (alcance
+        deliberadamente angosto, confirmado con el negocio). reason es
+        OBLIGATORIO — queda auditado junto con la reducción, para
+        distinguir esto de un picking normal. new_quantity no puede ser
+        mayor a la cantidad actual (esto es para reducir, no para
+        aumentar — 400 si se intenta subir).
+      parameters:
+        - name: truck_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: order_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: item_code
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_quantity, reason]
+              properties:
+                new_quantity:
+                  type: number
+                  format: double
+                  description: Nueva cantidad para esta orden+ítem. Debe ser menor a la actual.
+                reason:
+                  type: string
+                  description: Obligatorio. Ej. "Faltante detectado en reconciliación antes de facturar".
+      responses:
+        '200':
+          description: Reducción aplicada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PalletAssignmentAdjustment' }
+        '400':
+          description: new_quantity no es menor a la cantidad actual, o reason vacío
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El camión no está en ALISTADO
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/trucks/{truck_id}/send-to-invoicing:
+    post:
+      tags: [dispatch-admin]
+      summary: Envío manual a facturación — encola ORDER_INVOICE para todas las órdenes elegibles del camión
+      description: >
+        ★ v0.27.0. REQUIERE ADMIN. Reemplaza el disparo automático que
+        existía en ALISTADO desde v0.22.0 — ahora SOLO esto encola las
+        tareas. EXIGE que el último invoice-readiness de este camión
+        haya salido limpio (is_clean=true) Y reciente (dentro de los
+        últimos 5 minutos) — 409 si no, con el detalle de por qué
+        (nunca se corrió, salió con discrepancias, o ya pasó el tiempo
+        límite). Misma lógica de siempre para elegir órdenes: APROBADA
+        con al menos una línea de PalletAssignment > 0; las de faltante
+        total no generan tarea. Calcula y persiste bin_allocations en
+        este momento (movido desde el punto de encolado automático que
+        existía antes).
+      parameters:
+        - name: truck_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tareas encoladas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks_created:
+                    type: integer
+                    description: Cuántas SapIntegrationTask se encolaron (una por orden elegible).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >
+            El camión no está en ALISTADO, o el último invoice-readiness
+            no es limpio y reciente — ver Error.code
+            (no_readiness_check | stale_readiness_check | discrepancies_found).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.28.0 — MÓDULO DE PROMOCIONES
+  # ═══════════════════════════════════════════════════════════════
+
+  /admin/promotions:
+    get:
+      tags: [promotions-admin]
+      summary: Lista de promociones (ANALISTA_COMERCIAL o ADMIN)
+      description: >
+        ★ v0.28.0. REQUIERE ANALISTA_COMERCIAL o ADMIN. Lista paginada
+        de todas las promociones — activas e inactivas. Para la vista
+        del vendedor (solo las que le aplican) usar GET /promotions.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [ACTIVE, INACTIVE] }
+      responses:
+        '200':
+          description: Lista de promociones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promotions:
+                    type: array
+                    items: { $ref: '#/components/schemas/PromotionSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [promotions-admin]
+      summary: Crear una promoción nueva (empieza INACTIVE)
+      description: >
+        ★ v0.28.0. REQUIERE ANALISTA_COMERCIAL o ADMIN. La promoción
+        empieza INACTIVE — el analista la activa explícitamente después.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromotionCreate' }
+      responses:
+        '201':
+          description: Promoción creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromotionDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/promotions/{promotion_id}:
+    get:
+      tags: [promotions-admin]
+      summary: Detalle completo de una promoción
+      description: ★ v0.28.0. REQUIERE ANALISTA_COMERCIAL o ADMIN.
+      parameters:
+        - name: promotion_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Detalle completo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromotionDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    put:
+      tags: [promotions-admin]
+      summary: Editar una promoción (solo si está INACTIVE)
+      description: >
+        ★ v0.28.0. REQUIERE ANALISTA_COMERCIAL o ADMIN. Solo se puede
+        editar una promoción INACTIVE — 409 si está ACTIVE. Para
+        editar, primero desactívala.
+      parameters:
+        - name: promotion_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromotionCreate' }
+      responses:
+        '200':
+          description: Promoción actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromotionDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: No se puede editar una promoción ACTIVE
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/promotions/{promotion_id}/activate:
+    post:
+      tags: [promotions-admin]
+      summary: Activar una promoción
+      description: >
+        ★ v0.28.0. REQUIERE ANALISTA_COMERCIAL o ADMIN. 400 si
+        valid_from/valid_to no están configuradas, o si valid_to ya
+        pasó.
+      parameters:
+        - name: promotion_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Promoción activada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromotionDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/promotions/{promotion_id}/deactivate:
+    post:
+      tags: [promotions-admin]
+      summary: Desactivar una promoción
+      description: ★ v0.28.0. REQUIERE ANALISTA_COMERCIAL o ADMIN.
+      parameters:
+        - name: promotion_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Promoción desactivada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromotionDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /promotions:
+    get:
+      tags: [promotions]
+      summary: Libro de promociones del vendedor autenticado
+      description: >
+        ★ v0.28.0. REQUIERE VENDEDOR o ANALISTA_COMERCIAL. Solo devuelve
+        las promociones ACTIVE, dentro de su vigencia (valid_from ≤ hoy
+        ≤ valid_to), y asignadas al vendedor autenticado
+        (PromotionSalesperson). El vendedor nunca ve las inactivas, las
+        vencidas, ni las de otros vendedores.
+      parameters:
+        - name: q
+          in: query
+          description: Búsqueda por título, código de ítem, o nombre de ítem
+          schema: { type: string }
+      responses:
+        '200':
+          description: Promociones disponibles para este vendedor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promotions:
+                    type: array
+                    items: { $ref: '#/components/schemas/PromotionSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /promotions/{promotion_id}:
+    get:
+      tags: [promotions]
+      summary: Detalle de una promoción (desde la perspectiva del vendedor)
+      description: >
+        ★ v0.28.0. REQUIERE VENDEDOR o ANALISTA_COMERCIAL. 403 si la
+        promoción no está asignada al vendedor autenticado.
+      parameters:
+        - name: promotion_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Detalle de la promoción
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromotionDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /admin/orders:
+
     get:
       tags: [admin]
       summary: Grilla de órdenes recibidas
@@ -3216,6 +3903,194 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /admin/sap-salespersons:
+    get:
+      tags: [dispatch-admin]
+      summary: Vendedores reales de SAP (espejo de solo lectura), con estado de aprovisionamiento
+      description: >
+        ★ v0.21.1 — REQUIERE ADMIN. Lee de SapSalespersons (el espejo que
+        llena la sincronización real de SAP — NO la tabla de login). Cada
+        fila indica si ya tiene cuenta de login creada (Salespersons) o no,
+        para que la pantalla "Gestionar Usuarios" del Dashboard muestre
+        quién falta por aprovisionar. Vacío de contrato encontrado durante
+        la validación de producción: GET /admin/salespersons solo lee la
+        tabla de login (vacía salvo el admin de bootstrap), y no había
+        ninguna forma de ver los vendedores reales de SAP pendientes de
+        aprovisionar. Campo de nombre: display_name (NO "name") — mismo
+        nombre de campo que ya usa GET /admin/salespersons, por consistencia.
+      responses:
+        '200':
+          description: Vendedores reales de SAP con estado de aprovisionamiento
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sap_salespersons:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        salesperson_code: { type: string, description: "SlpCode real de SAP." }
+                        display_name: { type: string }
+                        is_active: { type: boolean, description: "Estado en SAP, no en el login." }
+                        has_login_account:
+                          type: boolean
+                          description: Ya existe una cuenta en Salespersons (login) para este código.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/salespersons/provision:
+    post:
+      tags: [dispatch-admin]
+      summary: ADMIN crea la cuenta de login real de un vendedor
+      description: >
+        ★ v0.21.1 — REQUIERE ADMIN. Crea una cuenta VENDEDOR real en la
+        tabla de login (Salespersons), vinculada a un salesperson_code que
+        DEBE existir en SapSalespersons (validar contra el espejo real —
+        400, code=salesperson_code_not_found, si el código no existe ahí).
+        409 (code=salesperson_already_provisioned) si ese salesperson_code
+        ya tiene cuenta de login. 409 (code=username_taken) si el username
+        ya pertenece a OTRA cuenta cualquiera (vendedor o admin) — son dos
+        causas de 409 DISTINTAS en el mismo endpoint, distínguelas por
+        Error.code, no asumas que un 409 siempre significa lo mismo. El
+        ADMIN define la contraseña inicial manualmente (no autogenerada) —
+        mínimo 8 caracteres, validar server-side (400,
+        code=password_too_short, si no cumple). display_name se toma del
+        espejo SAP, no se recibe en el body. La respuesta 201 SÍ devuelve
+        cuerpo (salesperson_code, username, display_name del vendedor
+        creado) — no queda vacía.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [salesperson_code, username, password]
+              properties:
+                salesperson_code: { type: string, description: "Debe existir en SapSalespersons." }
+                username: { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        '201':
+          description: Cuenta de vendedor creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  salesperson_code: { type: string }
+                  username: { type: string }
+                  display_name: { type: string }
+        '400':
+          description: salesperson_code no existe en SapSalespersons (code=salesperson_code_not_found), o password muy corta (code=password_too_short)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: >
+            Dos causas distintas, distinguir por Error.code: ese
+            salesperson_code ya tiene cuenta (code=salesperson_already_provisioned),
+            o el username ya pertenece a otra cuenta (code=username_taken).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.24.0 — CREAR CUENTAS DE BODEGUERO/DRIVER DESDE CERO
+  # ═══════════════════════════════════════════════════════════════
+  # A diferencia de /admin/salespersons/provision (que ACTIVA una cuenta
+  # para alguien que ya existe como SlpCode real en SAP), BODEGUERO y
+  # DRIVER no son un concepto de SAP en absoluto — son personal interno
+  # del WMS. Por eso este es un flujo distinto: crear una cuenta de cero,
+  # sin ningún espejo de SAP contra el cual validar. Vive en la MISMA
+  # pantalla "Gestionar Usuarios" del Dashboard, como sección aparte.
+
+  /admin/staff:
+    get:
+      tags: [dispatch-admin]
+      summary: Lista el personal de bodega/reparto ya creado (BODEGUERO, DRIVER)
+      description: >
+        ★ v0.24.0. REQUIERE ADMIN. A diferencia de /admin/sap-salespersons,
+        esto NO lee ningún espejo de SAP — lista directo la tabla de login
+        (Salespersons) filtrada a Role IN (BODEGUERO, DRIVER). No hay
+        "pendientes de aprovisionar" que mostrar, porque no existen fuera
+        del WMS hasta que se crean aquí.
+      responses:
+        '200':
+          description: Lista de personal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  staff:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        username: { type: string }
+                        display_name: { type: string }
+                        role: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/staff/provision:
+    post:
+      tags: [dispatch-admin]
+      summary: ADMIN crea una cuenta nueva de BODEGUERO o DRIVER desde cero
+      description: >
+        ★ v0.24.0. REQUIERE ADMIN. Crea una cuenta de login real
+        (Salespersons) SIN ningún vínculo a SAP (Code queda null) — a
+        diferencia de /admin/salespersons/provision, aquí no hay
+        salesperson_code que validar, porque BODEGUERO/DRIVER no existen
+        en SAP. role debe ser BODEGUERO o DRIVER (400,
+        code=invalid_staff_role, si se manda otro rol — VENDEDOR/ADMIN/
+        APROBADOR_* no se crean por este endpoint). El ADMIN define
+        display_name y la contraseña inicial manualmente — mínimo 8
+        caracteres (400, code=password_too_short). 409
+        (code=username_taken) si el username ya pertenece a OTRA cuenta
+        cualquiera (vendedor, admin, u otro bodeguero/driver).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, display_name, role]
+              properties:
+                username: { type: string }
+                password: { type: string, minLength: 8 }
+                display_name: { type: string }
+                role:
+                  type: string
+                  enum: [BODEGUERO, DRIVER]
+      responses:
+        '201':
+          description: Cuenta de personal creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  display_name: { type: string }
+                  role: { $ref: '#/components/schemas/Role' }
+        '400':
+          description: role inválido (code=invalid_staff_role), o password muy corta (code=password_too_short)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: username ya pertenece a otra cuenta (code=username_taken)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /admin/trucks/{truck_id}/assign-driver:
     post:
       tags: [dispatch-admin]
@@ -3893,10 +4768,35 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    # ★ v0.23.0 — DISPARO A DEMANDA DEL REFRESCO DEL ESPEJO
+    SapRefreshResult:
+      type: object
+      description: >
+        ★ v0.23.0. Resultado real de una corrida de SapMirrorRefreshService
+        — mismo objeto que ya se logueaba internamente en cada ciclo de
+        15 min, ahora también devuelto como respuesta HTTP.
+      properties:
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        source_results:
+          type: array
+          description: >
+            Una fila por cada una de las 7 vistas leídas (vw_WMS_Items,
+            vw_WMS_Stock, vw_WMS_BinStock, vw_WMS_Clients,
+            vw_WMS_Salespersons, vw_WMS_ClientCredit, vw_WMS_ClientDocuments).
+          items:
+            type: object
+            properties:
+              source: { type: string, description: "ej. vw_WMS_Stock" }
+              rows_upserted: { type: integer }
+              succeeded: { type: boolean }
+              error_detail: { type: string, nullable: true }
+
     # ★ v0.17.0 — AGREGADOS APROBADOR_PAGOS, APROBADOR_CREDITOS
     Role:
       type: string
-      enum: [VENDEDOR, ADMIN, BODEGUERO, DRIVER, APROBADOR_PAGOS, APROBADOR_CREDITOS]
+      enum: [VENDEDOR, ADMIN, BODEGUERO, DRIVER, APROBADOR_PAGOS, APROBADOR_CREDITOS, ANALISTA_COMERCIAL]
+      description: ★ v0.28.0 — se agrega ANALISTA_COMERCIAL para gestión de promociones.
 
     # ═══════════════ ★ NUEVO v0.17.0 — PAGOS DE CARTERA Y CRÉDITOS ═══════════════
     ApprovalStatus:
@@ -4052,6 +4952,282 @@ components:
               items: { $ref: '#/components/schemas/CreditRequestLine' }
             decided_by: { type: string }
             decided_at: { type: string, format: date-time }
+
+    SapOrderInvoiceSyncTask:
+      type: object
+      description: >
+        ★ v0.22.0. Igual patrón que SapAccountPaymentSyncTask/
+        SapCreditRequestSyncTask, pero sin decided_by/decided_at — no hay
+        aprobador de negocio aquí, la tarea se encola automáticamente
+        cuando el camión llega a ALISTADO. El snapshot trae ya resueltas
+        las cantidades reales (de PalletAssignment, NO de OrderLine.Quantity)
+        y el precio congelado de cada línea (de OrderLine — el WMS nunca
+        revalida el precio, SAP debe obedecerlo tal cual).
+      properties:
+        task_id: { type: integer }
+        document_uuid: { type: string, format: uuid, description: "= Order.ClientUuid (OrderUuid)" }
+        status: { $ref: '#/components/schemas/SapIntegrationTaskStatus' }
+        forced: { type: boolean }
+        attempts: { type: integer }
+        error_detail: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_attempt_at: { type: string, format: date-time, nullable: true }
+        order_invoice:
+          type: object
+          description: >
+            Snapshot de la orden ya lista para facturar (camión en
+            ALISTADO). Documento STANDALONE — no referencia ninguna Orden
+            de Venta base en SAP (no existe tal documento para estas
+            transacciones).
+          properties:
+            order_uuid: { type: string, format: uuid }
+            client_code: { type: string }
+            truck_id: { type: string, format: uuid }
+            invoice_date:
+              type: string
+              format: date
+              description: Fecha del momento en que el camión llegó a ALISTADO (Truck.AlistadoAtUtc).
+            lines:
+              type: array
+              description: >
+                Solo incluye ítems con cantidad repartida > 0 (de
+                PalletAssignment). Si una línea de la orden quedó en
+                faltante total, no aparece aquí.
+              items:
+                type: object
+                properties:
+                  item_code: { type: string }
+                  quantity:
+                    type: number
+                    format: double
+                    description: SUM(PalletAssignment.Quantity) para este OrderUuid+ItemCode — NO OrderLine.Quantity.
+                  unit_price:
+                    type: number
+                    format: double
+                    description: >
+                      OrderLine.UnitPrice congelado al tomar el pedido.
+                      Puede ser 0 (promoción legítima) — no es un error.
+                  discount_pct:
+                    type: number
+                    format: double
+                    nullable: true
+                    description: OrderLine.LineDiscountPct. Puede ser 100 (promoción legítima).
+                  expected_line_total:
+                    type: number
+                    format: double
+                    description: >
+                      ★ v0.25.0. quantity × unit_price × (1 - discount_pct/100),
+                      SIN redondear antes de multiplicar por quantity — misma
+                      fórmula exacta que usa SAP para su propio LineTotal
+                      (verificado con datos reales: SAP no redondea el precio
+                      con descuento antes de multiplicar). El sincronizador
+                      compara esto contra el DocTotal/LineTotal real que
+                      devuelva SAP tras crear la factura — si no coincide,
+                      repórtalo como advertencia, nunca lo fuerces a cuadrar
+                      ni lo trates como error bloqueante.
+                  bin_allocations:
+                    type: array
+                    description: >
+                      ★ v0.26.0. Cómo repartir "quantity" entre los bins reales
+                      de SAP para esta línea — necesario para
+                      DocumentLinesBinAllocations cuando el almacén exige
+                      asignación explícita (AutoAllocOnIssue=whsBinSingleChoiceOnly
+                      y el ítem tiene más de un bin). Calculado y persistido
+                      UNA SOLA VEZ al encolar la tarea (dentro de la misma
+                      transacción atómica que crea todas las tareas del
+                      camión), nunca recalculado en este GET — evita
+                      divergencias entre consultas y que dos tareas "gasten"
+                      el mismo bin. Si el ítem salió de un solo bin para este
+                      camión, hay una sola fila con approximate=false (hecho
+                      directo de TruckPickingCollection, no un cálculo). Si
+                      salió de más de uno, hay varias filas repartidas
+                      determinísticamente (fill-first) y approximate=true en
+                      todas — el Wave Picking recoge por camión, no por
+                      orden, así que a nivel de línea individual esto es una
+                      atribución razonada, no un hecho; a nivel de TODO el
+                      camión, la suma sí cuadra exacto contra lo recogido por
+                      bin. El sincronizador arma DocumentLinesBinAllocations
+                      con esto tal cual, sin recalcular nada de su lado.
+                    items:
+                      type: object
+                      properties:
+                        bin_code: { type: string }
+                        quantity: { type: number, format: double }
+                        approximate:
+                          type: boolean
+                          description: >
+                            false = hecho directo (un solo bin para este
+                            ítem+camión). true = repartido determinísticamente
+                            entre varios bins — exacto en el agregado del
+                            camión, aproximado por línea individual.
+            expected_doc_total:
+              type: number
+              format: double
+              description: >
+                ★ v0.25.0. Suma de todos los expected_line_total. Es lo único
+                que le da al sincronizador algo contra qué comparar el
+                DocTotal real que devuelva SAP — sin esto, no hay forma de
+                detectar una divergencia real (ej. la primera factura con un
+                descuento fraccionario, donde el redondeo de SAP puede diferir
+                en centavos).
+
+    # ★ v0.28.0 — PROMOCIONES
+    PromotionType:
+      type: string
+      enum: [FREE_ITEMS, DISCOUNTED_ITEMS]
+      description: >
+        FREE_ITEMS: los ítems de beneficio son gratis (discount_pct=100).
+        DISCOUNTED_ITEMS: los ítems de beneficio tienen un descuento
+        definido por el analista, diferente por ítem.
+
+    PromotionStatus:
+      type: string
+      enum: [ACTIVE, INACTIVE]
+
+    PromotionConditionItem:
+      type: object
+      description: >
+        Ítem que el cliente debe comprar a precio completo para activar
+        la promoción. La cantidad mínima (min_quantity) es la suma total
+        de TODOS los ConditionItems que debe estar en el carrito para
+        que la promoción sea aplicable.
+      properties:
+        item_code: { type: string }
+        min_quantity:
+          type: number
+          format: double
+          description: Cantidad mínima requerida de este ítem a precio completo.
+
+    PromotionBenefitItem:
+      type: object
+      description: >
+        Ítem que se entrega gratis (discount_pct=100 si FREE_ITEMS) o
+        con descuento (discount_pct definido por el analista si
+        DISCOUNTED_ITEMS).
+      properties:
+        item_code: { type: string }
+        quantity:
+          type: number
+          format: double
+        discount_pct:
+          type: number
+          format: double
+          description: >
+            100.0 si el tipo de promoción es FREE_ITEMS.
+            Valor entre 0 y 100 definido por el analista si DISCOUNTED_ITEMS.
+
+    PromotionSummary:
+      type: object
+      description: Vista resumida para listas y grillas.
+      properties:
+        promotion_id: { type: string, format: uuid }
+        title: { type: string }
+        type: { $ref: '#/components/schemas/PromotionType' }
+        status: { $ref: '#/components/schemas/PromotionStatus' }
+        valid_from: { type: string, format: date, nullable: true }
+        valid_to: { type: string, format: date, nullable: true }
+
+    PromotionDetail:
+      type: object
+      description: Vista completa de una promoción, incluyendo sus ítems.
+      properties:
+        promotion_id: { type: string, format: uuid }
+        title: { type: string }
+        type: { $ref: '#/components/schemas/PromotionType' }
+        status: { $ref: '#/components/schemas/PromotionStatus' }
+        valid_from: { type: string, format: date, nullable: true }
+        valid_to: { type: string, format: date, nullable: true }
+        condition_items:
+          type: array
+          description: >
+            Ítems a precio completo que activan la promoción. La suma
+            de sus cantidades define las condiciones mínimas para que
+            el vendedor pueda agregar el bloque de beneficios al carrito.
+          items: { $ref: '#/components/schemas/PromotionConditionItem' }
+        benefit_items:
+          type: array
+          description: Ítems que se agregan con descuento o gratis.
+          items: { $ref: '#/components/schemas/PromotionBenefitItem' }
+        salesperson_codes:
+          type: array
+          description: Vendedores que pueden usar esta promoción.
+          items: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+
+    PromotionCreate:
+      type: object
+      required: [title, type, condition_items, benefit_items, salesperson_codes]
+      properties:
+        title: { type: string }
+        type: { $ref: '#/components/schemas/PromotionType' }
+        valid_from: { type: string, format: date, nullable: true }
+        valid_to: { type: string, format: date, nullable: true }
+        condition_items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/PromotionConditionItem' }
+        benefit_items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/PromotionBenefitItem' }
+        salesperson_codes:
+          type: array
+          minItems: 1
+          description: Al menos un vendedor debe estar asignado.
+          items: { type: string }
+
+    TruckInvoiceReadiness:
+
+      type: object
+      description: >
+        ★ v0.27.0. Resultado del chequeo de reconciliación de un camión
+        en ALISTADO. Cada consulta persiste checked_at/is_clean en el
+        propio camión — es lo que POST .../send-to-invoicing exige.
+      properties:
+        truck_id: { type: string, format: uuid }
+        checked_at: { type: string, format: date-time }
+        is_clean:
+          type: boolean
+          description: true si NINGÚN ítem tiene discrepancy > 0.
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              item_code: { type: string }
+              demanded:
+                type: number
+                format: double
+                description: SUM(PalletAssignment.Quantity) de todas las órdenes APROBADA del camión para este ítem.
+              available:
+                type: number
+                format: double
+                description: Stock real en almacén 01 (vw_WMS_Stock) al momento del chequeo.
+              discrepancy:
+                type: number
+                format: double
+                description: max(0, demanded - available). 0 = sin problema para este ítem.
+              orders_with_this_item:
+                type: array
+                description: Qué órdenes tienen este ítem — para que el jefe de bodega elija cuál reducir si hay discrepancia.
+                items:
+                  type: object
+                  properties:
+                    order_uuid: { type: string, format: uuid }
+                    quantity: { type: number, format: double }
+
+    PalletAssignmentAdjustment:
+      type: object
+      description: ★ v0.27.0. Registro de una reducción dirigida — el rastro de auditoría que exigió Camilo.
+      properties:
+        order_uuid: { type: string, format: uuid }
+        item_code: { type: string }
+        previous_quantity: { type: number, format: double }
+        new_quantity: { type: number, format: double }
+        reason: { type: string }
+        adjusted_by: { type: string }
+        adjusted_at: { type: string, format: date-time }
 
     AccountPaymentMethod:
       type: string
@@ -5746,7 +6922,18 @@ components:
           format: double
           minimum: 0
           maximum: 100
-          description: 100 ES VÁLIDO.
+          description: 100 ES VÁLIDO (ítem gratis de una promoción).
+        promotion_group_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            ★ v0.28.0. Si esta línea pertenece a un bloque de promoción,
+            todas las líneas del mismo bloque (condición + beneficio)
+            comparten el mismo promotion_group_id. El servidor rechaza
+            (400) un pedido donde se eliminen solo ALGUNAS líneas de un
+            mismo grupo (el bloque es indivisible — se agrega y se
+            elimina completo). Null para líneas normales sin promoción.
 
     OrderAccepted:
       type: object
