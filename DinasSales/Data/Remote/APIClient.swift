@@ -30,6 +30,14 @@ protocol CreditAPI: Sendable {
     func fetchStatement(clientCode: String) async throws -> ClientStatement
 }
 
+/// Libro de promociones del vendedor (★ v0.28.0). Requiere conexión (no se cachea).
+protocol PromotionsAPI: Sendable {
+    /// `GET /promotions?q=`. Solo activas, vigentes y asignadas al vendedor (filtra el server).
+    func fetchPromotions(query: String?) async throws -> [PromotionSummary]
+    /// `GET /promotions/{id}`. 403 si no está asignada al vendedor.
+    func fetchPromotion(id: String) async throws -> PromotionDetail
+}
+
 /// Subida del bloque de cartera (★ v0.17.0, requiere token).
 protocol CarteraUploadAPI: Sendable {
     /// `POST /evidence-photos`. Sube la foto (base64) y devuelve su URL. REQUIERE conexión;
@@ -51,7 +59,7 @@ protocol CarteraUploadAPI: Sendable {
 /// El JWT se inyecta vía `tokenProvider` y se añade como `Authorization: Bearer` en
 /// todos los endpoints salvo `login` (público). Si falta un campo/endpoint en el
 /// contrato, no se inventa: se eleva al Arquitecto.
-struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI, CarteraUploadAPI {
+struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI, CarteraUploadAPI, PromotionsAPI {
     /// URL base del middleware (incluye el path base `/v1`). Ver `AppConfig`.
     var baseURL: URL?
     var session: URLSession
@@ -127,6 +135,22 @@ struct APIClient: AuthAPI, SyncDownAPI, SyncUpAPI, CreditAPI, CarteraUploadAPI {
         } catch {
             return false         // error de transporte → inalcanzable
         }
+    }
+
+    // MARK: - Promociones (★ v0.28.0)
+
+    func fetchPromotions(query: String?) async throws -> [PromotionSummary] {
+        var q: [URLQueryItem] = []
+        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            q.append(URLQueryItem(name: "q", value: query))
+        }
+        let request = try makeRequest(path: "promotions", method: "GET", query: q)
+        return try await send(request, decode: PromotionsResponse.self).promotions
+    }
+
+    func fetchPromotion(id: String) async throws -> PromotionDetail {
+        let request = try makeRequest(path: "promotions/\(id)", method: "GET")
+        return try await send(request, decode: PromotionDetail.self)
     }
 
     // MARK: - Cartera (★ v0.4.0)

@@ -338,6 +338,17 @@ final class AppDatabase {
             }
         }
 
+        // ★ v0.28.0 — Promociones. `promotion_group_id` viaja al server (agrupa las líneas de un
+        // bloque, condición + beneficio). `promotion_title` es LOCAL (para mostrar el encabezado
+        // del bloque en el carrito); no se envía en el POST. Ambos nullable: las líneas normales
+        // los dejan en NULL.
+        migrator.registerMigration("v12_promociones") { db in
+            try db.alter(table: "order_lines") { t in
+                t.add(column: "promotion_group_id", .text)
+                t.add(column: "promotion_title", .text)
+            }
+        }
+
         return migrator
     }
 }

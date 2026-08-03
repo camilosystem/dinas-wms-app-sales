@@ -38,7 +38,7 @@ struct OrderCartView: View {
                     Text("Carrito vacío. Agrega ítems.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(viewModel.rows) { row in
+                    ForEach(viewModel.normalRows) { row in
                         CartRowView(
                             row: row,
                             authorizedPriceLists: viewModel.authorizedPriceLists,
@@ -53,6 +53,22 @@ struct OrderCartView: View {
             } footer: {
                 if let error = viewModel.errorMessage {
                     Text(error).foregroundStyle(.red)
+                }
+            }
+
+            // ★ v0.28.0 — Un Section por bloque de promoción. Inmutable: líneas solo-lectura y una
+            // acción para quitar el bloque completo (no se editan líneas sueltas).
+            ForEach(viewModel.promotionBlocks, id: \.groupId) { block in
+                Section {
+                    ForEach(block.rows) { row in PromoBlockRow(row: row) }
+                    Button(role: .destructive) {
+                        viewModel.removePromotion(groupId: block.groupId)
+                    } label: {
+                        Label("Quitar promoción", systemImage: "trash")
+                    }
+                } header: {
+                    Label(block.title, systemImage: "tag.fill")
+                        .foregroundStyle(.tint)
                 }
             }
 
@@ -123,7 +139,12 @@ struct OrderCartView: View {
                 priceLists: viewModel.authorizedPriceLists,   // visibles: [3] o [2,3]
                 addList: viewModel.defaultPriceList,           // con la que se agrega
                 quantities: viewModel.quantitiesByItem,
-                onSetQuantity: { item, qty in viewModel.setQuantity(item: item, quantity: qty) }
+                onSetQuantity: { item, qty in viewModel.setQuantity(item: item, quantity: qty) },
+                promotionsAPI: environment.api,
+                isOnline: { environment.network.isOnline },
+                onAddPromotion: { title, groupId, lines in
+                    viewModel.addPromotion(title: title, groupId: groupId, lines: lines)
+                }
             )
         }
         // Advertencia de retención por cartera. Es un AVISO, no un bloqueo: el vendedor
@@ -147,6 +168,30 @@ struct OrderCartView: View {
     private func confirmOrder() {
         pendingHoldWarning = nil
         if viewModel.confirm() { onFinish() }
+    }
+}
+
+/// Fila de solo-lectura de una línea de promoción (el bloque es inmutable).
+private struct PromoBlockRow: View {
+    let row: CartRow
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.name).font(.body.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(MoneyFormat.string(row.lineTotal)).font(.callout.weight(.semibold))
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var detail: String {
+        let qty = "×\(row.quantity.formatted())"
+        if row.discountPct >= 100 { return "\(qty) · Gratis" }
+        if row.discountPct > 0 { return "\(qty) · \(row.discountPct.formatted())% dcto" }
+        return "\(qty) · \(MoneyFormat.string(row.unitPrice)) c/u"
     }
 }
 

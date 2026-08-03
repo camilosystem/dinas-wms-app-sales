@@ -37,6 +37,63 @@ final class OrdersRepositoryTests: XCTestCase {
         try repo.lines(orderUUID: uuid).first { $0.itemCode == item && $0.priceList == priceList }!.id!
     }
 
+    // MARK: - Promociones (★ v0.28.0)
+
+    func test_addPromotionBlock_insertaLineasConGrupoCompartido_yPrecioDeCatalogo() throws {
+        let db = try AppDatabase.makeInMemory(); try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+
+        try repo.addPromotionBlock(
+            orderUUID: order.clientUUID, promotionGroupId: "promo-1", title: "2x1 Item",
+            priceList: 1,
+            lines: [PromotionLineInput(itemCode: "I1", quantity: 2, discountPct: 0),    // condición
+                    PromotionLineInput(itemCode: "I2", quantity: 1, discountPct: 100)]) // beneficio gratis
+
+        let lines = try repo.lines(orderUUID: order.clientUUID)
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertTrue(lines.allSatisfy { $0.promotionGroupId == "promo-1" }, "comparten el group id")
+        XCTAssertTrue(lines.allSatisfy { $0.promotionTitle == "2x1 Item" }, "guardan el título local")
+        let benefit = lines.first { $0.itemCode == "I2" }
+        XCTAssertEqual(benefit?.lineDiscountPct, 100, "beneficio con su descuento")
+        XCTAssertEqual(benefit?.unitPrice, 5, "unit_price del catálogo (I2 lista 1 = 5)")
+        XCTAssertTrue(lines.allSatisfy { $0.isPromotion })
+    }
+
+    func test_removePromotionBlock_borraTodoElBloque_peroNoLasNormales() throws {
+        let db = try AppDatabase.makeInMemory(); try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+        // Línea normal + bloque de promoción sobre el MISMO ítem I1.
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 3)
+        try repo.addPromotionBlock(orderUUID: order.clientUUID, promotionGroupId: "promo-1",
+                                   title: "P", priceList: 1,
+                                   lines: [PromotionLineInput(itemCode: "I1", quantity: 2, discountPct: 0)])
+        XCTAssertEqual(try repo.lines(orderUUID: order.clientUUID).count, 2)
+
+        try repo.removePromotionBlock(orderUUID: order.clientUUID, promotionGroupId: "promo-1")
+        let left = try repo.lines(orderUUID: order.clientUUID)
+        XCTAssertEqual(left.count, 1, "solo queda la normal")
+        XCTAssertFalse(left[0].isPromotion)
+        XCTAssertEqual(left[0].quantity, 3)
+    }
+
+    func test_setQuantity_noTocaLaLineaDePromocionDelMismoItem() throws {
+        let db = try AppDatabase.makeInMemory(); try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.addPromotionBlock(orderUUID: order.clientUUID, promotionGroupId: "promo-1",
+                                   title: "P", priceList: 1,
+                                   lines: [PromotionLineInput(itemCode: "I1", quantity: 2, discountPct: 0)])
+        // El picker fija I1 lista 1 a 5: debe crear/editar una línea NORMAL aparte, no la de promo.
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 5)
+
+        let lines = try repo.lines(orderUUID: order.clientUUID).sorted { $0.quantity < $1.quantity }
+        XCTAssertEqual(lines.count, 2, "coexisten la de promo y la normal")
+        XCTAssertEqual(lines.first { $0.isPromotion }?.quantity, 2, "la de promo quedó intacta")
+        XCTAssertEqual(lines.first { !$0.isPromotion }?.quantity, 5, "la normal es la editable")
+    }
+
     func test_startOrder_creaBorradorYNoDuplicaPorCliente() throws {
         let db = try AppDatabase.makeInMemory()
         try seed(db)
@@ -201,6 +258,28 @@ final class OrdersRepositoryTests: XCTestCase {
         let dto = OrderCreateDTO(order: try repo.order(uuid: order.clientUUID)!, lines: [line])
         XCTAssertEqual(dto.lines.first?.priceList, 2)
         XCTAssertEqual(dto.lines.first?.unitPrice, 8)
+    }
+
+    /// El DTO incluye promotion_group_id en las líneas de promo y lo OMITE en las normales.
+    func test_dto_promotionGroupId_soloEnLineasDePromocion() throws {
+        let db = try AppDatabase.makeInMemory(); try seed(db)
+        let repo = makeRepo(db)
+        let order = try repo.startOrder(clientCode: "C1")
+        try repo.setQuantity(orderUUID: order.clientUUID, itemCode: "I1", priceList: 1, quantity: 1)
+        try repo.addPromotionBlock(orderUUID: order.clientUUID, promotionGroupId: "G-9", title: "P",
+                                   priceList: 1,
+                                   lines: [PromotionLineInput(itemCode: "I2", quantity: 1, discountPct: 100)])
+        let lines = try repo.lines(orderUUID: order.clientUUID)
+        let dto = OrderCreateDTO(order: try repo.order(uuid: order.clientUUID)!, lines: lines)
+
+        let data = try JSONEncoder().encode(dto)
+        let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let jsonLines = obj["lines"] as! [[String: Any]]
+        let normal = jsonLines.first { ($0["item_code"] as? String) == "I1" }!
+        let promo = jsonLines.first { ($0["item_code"] as? String) == "I2" }!
+        XCTAssertNil(normal["promotion_group_id"], "línea normal: sin la clave")
+        XCTAssertEqual(promo["promotion_group_id"] as? String, "G-9")
+        XCTAssertEqual(promo["line_discount_pct"] as? Double, 100)
     }
 
     /// Cambiar la lista de una línea recomputa su unit_price.

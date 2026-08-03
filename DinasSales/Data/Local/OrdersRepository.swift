@@ -198,10 +198,13 @@ struct OrdersRepository {
     /// `quantity <= 0` elimina la línea.
     func setQuantity(orderUUID: String, itemCode: String, priceList: Int, quantity: Double) throws {
         try database.dbQueue.write { db in
+            // Solo líneas NORMALES: las de promoción (promotion_group_id != nil) son inmutables y
+            // no las toca el selector, aunque coincida ítem+lista.
             let existing = try OrderLine
                 .filter(Column("order_uuid") == orderUUID)
                 .filter(Column("item_code") == itemCode)
                 .filter(Column("price_list") == priceList)
+                .filter(Column("promotion_group_id") == nil)
                 .fetchOne(db)
 
             if quantity <= 0 {
@@ -254,6 +257,38 @@ struct OrdersRepository {
     func removeLine(lineId: Int64) throws {
         try database.dbQueue.write { db in
             _ = try OrderLine.deleteOne(db, key: lineId)
+        }
+    }
+
+    // MARK: - Bloques de promoción (★ v0.28.0)
+
+    /// Inserta TODAS las líneas de un bloque de promoción (condición + beneficio) compartiendo el
+    /// mismo `promotionGroupId`. `unit_price` sale del catálogo en la lista dada (0 si el ítem no
+    /// está); las de condición van con descuento 0, las de beneficio con su `discountPct`. El
+    /// bloque es indivisible: se agrega completo aquí y se elimina completo en `removePromotionBlock`.
+    func addPromotionBlock(orderUUID: String, promotionGroupId: String, title: String,
+                           priceList: Int, lines: [PromotionLineInput]) throws {
+        try database.dbQueue.write { db in
+            for input in lines where input.quantity > 0 {
+                let unitPrice = try Item.fetchOne(db, key: input.itemCode)?.price(forList: priceList) ?? 0
+                var line = OrderLine(
+                    id: nil, orderUUID: orderUUID, itemCode: input.itemCode,
+                    quantity: input.quantity, unitPrice: unitPrice,
+                    lineDiscountPct: input.discountPct, priceList: priceList,
+                    promotionGroupId: promotionGroupId, promotionTitle: title)
+                try line.insert(db)
+            }
+        }
+    }
+
+    /// Elimina el bloque completo de promoción (todas sus líneas). Inmutable: no se editan líneas
+    /// sueltas, solo se quita el bloque entero.
+    func removePromotionBlock(orderUUID: String, promotionGroupId: String) throws {
+        try database.dbQueue.write { db in
+            try OrderLine
+                .filter(Column("order_uuid") == orderUUID)
+                .filter(Column("promotion_group_id") == promotionGroupId)
+                .deleteAll(db)
         }
     }
 
@@ -332,6 +367,13 @@ struct OrdersRepository {
     static func total(of lines: [OrderLine]) -> Double {
         lines.reduce(0) { $0 + lineTotal($1) }
     }
+}
+
+/// Una línea a insertar en un bloque de promoción (condición o beneficio).
+struct PromotionLineInput: Equatable {
+    let itemCode: String
+    let quantity: Double
+    let discountPct: Double   // 0 en condición; discount_pct del beneficio (100 si FREE_ITEMS)
 }
 
 enum OrdersError: Error, Equatable {

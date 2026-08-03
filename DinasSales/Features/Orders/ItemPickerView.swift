@@ -20,6 +20,14 @@ struct ItemPickerView: View {
     /// Cantidad absoluta del ítem en el carrito, por código (para el stepper y el badge).
     let onSetQuantity: (Item, Double) -> Void
 
+    /// ★ v0.28.0 — soporte del libro de promociones.
+    private let database: AppDatabase
+    private let promotionsAPI: PromotionsAPI
+    private let isOnline: () -> Bool
+    /// Agrega un bloque de promoción al carrito: (título, promotion_group_id, líneas).
+    private let onAddPromotion: (String, String, [PromotionLineInput]) -> Void
+    @State private var showPromotions = false
+
     /// Cantidad en el carrito por ítem — fuente de verdad local del picker (sembrada con lo que
     /// ya había en el carrito). Cada +/- la actualiza y la persiste vía `onSetQuantity`.
     @State private var cartQty: [String: Double]
@@ -30,13 +38,19 @@ struct ItemPickerView: View {
     private let columns = [GridItem(.adaptive(minimum: 165), spacing: 12)]
 
     init(database: AppDatabase, priceLists: [Int], addList: Int, quantities: [String: Double],
-         onSetQuantity: @escaping (Item, Double) -> Void) {
+         onSetQuantity: @escaping (Item, Double) -> Void,
+         promotionsAPI: PromotionsAPI, isOnline: @escaping () -> Bool,
+         onAddPromotion: @escaping (String, String, [PromotionLineInput]) -> Void) {
         _viewModel = StateObject(
             wrappedValue: CatalogViewModel(repository: CatalogRepository(database: database))
         )
         self.priceLists = priceLists
         self.addList = addList
         self.onSetQuantity = onSetQuantity
+        self.database = database
+        self.promotionsAPI = promotionsAPI
+        self.isOnline = isOnline
+        self.onAddPromotion = onAddPromotion
         _cartQty = State(initialValue: quantities)
     }
 
@@ -44,6 +58,7 @@ struct ItemPickerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 searchField
+                promotionsButton
                 if viewModel.items.isEmpty {
                     ContentUnavailableViewCompat(
                         title: viewModel.searchText.isEmpty ? "Catálogo vacío" : "Sin resultados",
@@ -74,6 +89,13 @@ struct ItemPickerView: View {
                     onSetQuantity: { newQty in setQty(item, to: newQty) }
                 )
             }
+            .sheet(isPresented: $showPromotions) {
+                PromotionsBookView(api: promotionsAPI, database: database, addList: addList,
+                                   isOnline: isOnline) { title, groupId, lines in
+                    onAddPromotion(title, groupId, lines)
+                    showToast("Promoción agregada")
+                }
+            }
             .overlay(alignment: .bottom) { toastView }
         }
     }
@@ -97,6 +119,21 @@ struct ItemPickerView: View {
         .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal)
         .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    /// Entrada al libro de promociones (★ v0.28.0).
+    private var promotionsButton: some View {
+        Button {
+            showPromotions = true
+        } label: {
+            Label("Promociones", systemImage: "tag")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+        }
+        .buttonStyle(.bordered)
+        .padding(.horizontal)
         .padding(.bottom, 4)
     }
 

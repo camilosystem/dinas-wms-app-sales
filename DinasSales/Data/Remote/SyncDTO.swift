@@ -105,6 +105,9 @@ struct OrderCreateDTO: Encodable {
         let unitPrice: Double
         let priceList: Int          // 1/2/3 — obligatorio en v0.3.0
         let lineDiscountPct: Double
+        /// ★ v0.28.0 — nil en líneas normales (el encoder omite la clave). Las líneas de un mismo
+        /// bloque de promoción comparten el mismo valor.
+        let promotionGroupId: String?
 
         enum CodingKeys: String, CodingKey {
             case itemCode = "item_code"
@@ -112,6 +115,7 @@ struct OrderCreateDTO: Encodable {
             case unitPrice = "unit_price"
             case priceList = "price_list"
             case lineDiscountPct = "line_discount_pct"
+            case promotionGroupId = "promotion_group_id"
         }
     }
 
@@ -130,7 +134,8 @@ struct OrderCreateDTO: Encodable {
         self.notes = order.notes
         self.lines = lines.map {
             Line(itemCode: $0.itemCode, quantity: $0.quantity, unitPrice: $0.unitPrice,
-                 priceList: $0.priceList, lineDiscountPct: $0.lineDiscountPct)
+                 priceList: $0.priceList, lineDiscountPct: $0.lineDiscountPct,
+                 promotionGroupId: $0.promotionGroupId)
         }
     }
 }

@@ -373,8 +373,17 @@ struct OrderLine: Codable, FetchableRecord, MutablePersistableRecord, Identifiab
     var unitPrice: Double       // precio unitario = precio del ítem en la lista elegida
     var lineDiscountPct: Double // descuento de línea en % (0–100)
     var priceList: Int          // lista elegida para ESTA línea (1/2/3); obligatorio en v0.3.0
+    /// ★ v0.28.0 — UUID del bloque de promoción (condición + beneficio comparten uno). nil en
+    /// líneas normales. Viaja en el POST.
+    var promotionGroupId: String?
+    /// ★ v0.28.0 — Título de la promoción, SOLO local (para el encabezado del bloque en el
+    /// carrito). NO se envía al server.
+    var promotionTitle: String?
 
     static let databaseTableName = "order_lines"
+
+    /// ¿Esta línea pertenece a un bloque de promoción? (inmutable en el carrito)
+    var isPromotion: Bool { promotionGroupId != nil }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -384,6 +393,8 @@ struct OrderLine: Codable, FetchableRecord, MutablePersistableRecord, Identifiab
         case unitPrice = "unit_price"
         case lineDiscountPct = "line_discount_pct"
         case priceList = "price_list"
+        case promotionGroupId = "promotion_group_id"
+        case promotionTitle = "promotion_title"
     }
 
     // Deja que SQLite asigne el rowid autoincremental.

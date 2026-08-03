@@ -11,7 +11,11 @@ struct CartRow: Identifiable, Equatable {
     let discountPct: Double
     /// Disponible del ítem según la ÚLTIMA sincronización (foto, no tiempo real).
     let available: Double
+    /// ★ v0.28.0 — si la línea es parte de un bloque de promoción (inmutable), su grupo y título.
+    let promotionGroupId: String?
+    let promotionTitle: String?
     var id: Int64 { lineId }
+    var isPromotion: Bool { promotionGroupId != nil }
     var lineTotal: Double { quantity * unitPrice * (1 - discountPct / 100) }
     /// Pidió más de lo que había disponible en la última sincronización → advertir (no bloquea).
     var exceedsAvailable: Bool { quantity > available }
@@ -69,7 +73,9 @@ final class OrderCartViewModel: ObservableObject {
                                name: item?.name ?? line.itemCode,
                                quantity: line.quantity, unitPrice: line.unitPrice,
                                priceList: line.priceList, discountPct: line.lineDiscountPct,
-                               available: item?.available ?? 0)
+                               available: item?.available ?? 0,
+                               promotionGroupId: line.promotionGroupId,
+                               promotionTitle: line.promotionTitle)
             }
             total = rows.reduce(0) { $0 + $1.lineTotal }
             errorMessage = nil
@@ -78,9 +84,35 @@ final class OrderCartViewModel: ObservableObject {
         }
     }
 
-    /// Cantidades en el carrito por ítem (todas las listas), para el contador del picker.
+    /// Cantidades en el carrito por ítem (líneas NORMALES; excluye promoción), para el contador
+    /// del picker — el stepper del picker solo controla las líneas normales.
     var quantitiesByItem: [String: Double] {
-        rows.reduce(into: [:]) { $0[$1.itemCode, default: 0] += $1.quantity }
+        rows.filter { !$0.isPromotion }
+            .reduce(into: [:]) { $0[$1.itemCode, default: 0] += $1.quantity }
+    }
+
+    /// Filas agrupadas por bloque de promoción, para mostrar el bloque con su encabezado.
+    var promotionBlocks: [(groupId: String, title: String, rows: [CartRow])] {
+        let promo = rows.filter { $0.isPromotion }
+        let groups = Dictionary(grouping: promo) { $0.promotionGroupId ?? "" }
+        return groups.map { (groupId: $0.key,
+                             title: $0.value.first?.promotionTitle ?? "Promoción",
+                             rows: $0.value) }
+            .sorted { $0.title < $1.title }
+    }
+
+    /// Filas normales (no promoción), para la sección principal del carrito.
+    var normalRows: [CartRow] { rows.filter { !$0.isPromotion } }
+
+    /// Agrega un bloque de promoción con su `groupId` (UUID nuevo generado por el que llama).
+    func addPromotion(title: String, groupId: String, lines: [PromotionLineInput]) {
+        write { try orders.addPromotionBlock(orderUUID: order.clientUUID, promotionGroupId: groupId,
+                                             title: title, priceList: defaultPriceList, lines: lines) }
+    }
+
+    /// Elimina un bloque de promoción completo (inmutable: no se editan líneas sueltas).
+    func removePromotion(groupId: String) {
+        write { try orders.removePromotionBlock(orderUUID: order.clientUUID, promotionGroupId: groupId) }
     }
 
     /// Añade un ítem con la lista por defecto del cliente (o suma 1 si ya está en esa lista).
