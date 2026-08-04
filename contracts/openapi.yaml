@@ -1,9 +1,53 @@
 openapi: 3.0.3
 info:
   title: Dinas WMS — API
-  version: 0.28.0
+  version: 0.29.0
   description: >
     Contrato de la API del middleware Dinas WMS.
+
+    ══════════════════════════════════════════════════════════════════════════
+    CAMBIOS EN v0.29.0 — ROL VENDEDOR_INSTITUCIONAL
+    ══════════════════════════════════════════════════════════════════════════
+
+    ★ QUÉ AGREGA
+      NUEVO ROL: VENDEDOR_INSTITUCIONAL — distinto de VENDEDOR y de
+      ANALISTA_COMERCIAL. Opera desde el Dashboard (no la app iOS), tiene
+      salesperson_code propio (mismo esquema que VENDEDOR), y puede tomar
+      pedidos (POST /orders, mismo pipeline que la app de vendedores, sin
+      campo de canal).
+
+      PROVISIONING: POST /admin/salespersons/provision gana un campo
+      OPCIONAL `role` (VENDEDOR | VENDEDOR_INSTITUCIONAL, default
+      VENDEDOR). Omitirlo es compatibilidad total con los clientes
+      existentes del endpoint. BODEGUERO/DRIVER siguen provisionándose
+      por POST /admin/staff/provision (v0.24.0); ADMIN/APROBADOR_PAGOS/
+      APROBADOR_CREDITOS/ANALISTA_COMERCIAL no se provisionan por
+      ninguna de las dos vías.
+
+      El 409 salesperson_already_provisioned aplica sin importar el rol
+      solicitado: un salesperson_code admite UNA SOLA cuenta de login.
+      GET /admin/sap-salespersons.has_login_account sigue siendo un
+      booleano simple, no distingue por rol.
+
+      DESCUENTO POR LÍNEA: sin cambio de tipo — nota de negocio nueva en
+      OrderLine.line_discount_pct sobre el tope por rol.
+
+    ★ QUÉ CORRIGE
+      Role es el rol de LOGIN del WMS, no un atributo del vendedor en SAP
+      (el espejo SapSalespersons solo trae salesperson_code, name,
+      is_active — SAP no tiene ningún concepto de rol). Dos consultas lo
+      trataban como si fuera un dato de SAP y respondían "¿es un vendedor
+      real?" mirando Role == VENDEDOR:
+
+      - GET /admin/salespersons — ahora lista toda cuenta CON
+        salesperson_code, sin mirar rol.
+      - La validación de client_code de POST /account-payments y
+        POST /credit-requests — ahora exige que el salesperson_code del
+        cliente mapee a una cuenta conocida, sin mirar su rol.
+
+      Para VENDEDOR el resultado no cambia. La corrección es de criterio:
+      ampliarlo a una lista de dos roles habría vuelto a romperse con el
+      siguiente rol que lleve código.
 
     ══════════════════════════════════════════════════════════════════════════
     CAMBIOS EN v0.28.0 — MÓDULO DE PROMOCIONES
@@ -1289,6 +1333,12 @@ paths:
       tags: [sync-down]
       summary: Catálogo con los 3 precios (vendedor)
       description: >
+        ★ v0.29.0 — REQUIERE VENDEDOR o VENDEDOR_INSTITUCIONAL. El rol
+        nuevo opera desde el Dashboard, no desde la app iOS, pero necesita
+        la misma superficie de sincronización para armar el carrito. Este
+        endpoint no filtra por vendedor: el catálogo es idéntico para
+        ambos roles.
+
         Solo llegan ítems con SellItem='Y' en SAP.
         Un precio de 0 es VÁLIDO y el ítem ES ORDENABLE (muestra / publicidad).
         `available` viene YA CALCULADO por el middleware.
@@ -1313,6 +1363,11 @@ paths:
       tags: [sync-down]
       summary: Clientes del vendedor, CON SUS DATOS DE CARTERA
       description: >
+        ★ v0.29.0 — REQUIERE VENDEDOR o VENDEDOR_INSTITUCIONAL. Sin cambio
+        de filtro para el rol nuevo: ambos ven ÚNICAMENTE los clientes
+        asignados a su propio salesperson_code (mismo esquema, sin
+        excepción).
+
         Solo los clientes ASIGNADOS al vendedor del token.
 
         ★ v0.4.0: cada cliente incluye ahora su información de CRÉDITO
@@ -1342,6 +1397,13 @@ paths:
       tags: [sync-down]
       summary: Estado ACTUAL de las órdenes del vendedor (delta)
       description: >
+        ★ v0.29.0 — REQUIERE VENDEDOR o VENDEDOR_INSTITUCIONAL. Sin cambio
+        de filtro: cada rol ve el estado ÚNICAMENTE de sus propias órdenes
+        (salesperson_code del token). Incluido junto con /sync/catalog y
+        /sync/clients porque comparten el [Authorize] a nivel de clase de
+        SyncController — y porque un institucional que toma pedidos
+        necesita ver cómo evolucionan, igual que cualquier VENDEDOR.
+
         ★ NUEVO en v0.4.1.
 
         POST /orders devuelve el estado de la orden UNA SOLA VEZ, al momento
@@ -1377,6 +1439,10 @@ paths:
       tags: [credit]
       summary: Estado de cuenta del cliente (facturas, NC, pagos)
       description: >
+        ★ v0.29.0 — REQUIERE VENDEDOR o VENDEDOR_INSTITUCIONAL. 403
+        client_not_assigned si el cliente no está asignado al
+        salesperson_code del token, sin distinción de rol.
+
         ★ NUEVO en v0.4.0.
 
         Documentos pendientes del cliente. La app lo baja para que el vendedor
@@ -1427,7 +1493,8 @@ paths:
         vendedor).
 
         `unit_price = 0` y `line_discount_pct = 100` son VÁLIDOS.
-        `price_list` debe estar entre las autorizadas del cliente (si no → 400).
+        `price_list` debe estar entre las autorizadas del cliente (si no → 400,
+        ver los códigos de error documentados abajo).
       requestBody:
         required: true
         content:
@@ -1444,7 +1511,31 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OrderAccepted' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: >
+            ★ v0.29.0 — códigos de error documentados (antes solo se decía
+            "400"). Distínguelos por `Error.code`, no por el texto del
+            mensaje.
+
+            · `unauthorized_price_list` — alguna línea usa un price_list que
+              el cliente no tiene autorizado. El mensaje nombra la línea
+              concreta y lista las autorizadas, así que es mostrable al
+              usuario tal cual. Ejemplo real: "price_list 1 no esta
+              autorizada para el cliente 'C100003' (linea 'F1MD-GARRAFA
+              LG-01'). Autorizadas: [3]."
+
+            · `invalid_promotion` — el bloque de una promoción llegó
+              incompleto. El bloque es INDIVISIBLE: o van todas sus líneas
+              (condición + beneficio, compartiendo el mismo
+              promotion_group_id) o no va ninguna. El mensaje nombra la
+              línea que falta. Ejemplo real: "Falta la linea de beneficio
+              'GDD0027' del bloque de la promocion '78866ea1-…'."
+
+            Otros 400 genéricos (payload malformado, campos faltantes)
+            siguen el formato estándar de Error.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ═══════════════════════════════════════════════════════════════
@@ -2351,7 +2442,14 @@ paths:
       tags: [promotions]
       summary: Libro de promociones del vendedor autenticado
       description: >
-        ★ v0.28.0. REQUIERE VENDEDOR o ANALISTA_COMERCIAL. Solo devuelve
+        ★ v0.29.0 — REQUIERE VENDEDOR, ANALISTA_COMERCIAL o
+        VENDEDOR_INSTITUCIONAL: el libro va embebido en el carrito del
+        Dashboard. Misma regla de visibilidad para el rol nuevo — para que
+        un institucional vea promociones, el ANALISTA_COMERCIAL debe
+        asignárselas a su salesperson_code como a cualquier otro vendedor;
+        sin asignación el libro sale vacío y POST /orders rechaza el bloque.
+
+        ★ v0.28.0. Solo devuelve
         las promociones ACTIVE, dentro de su vigencia (valid_from ≤ hoy
         ≤ valid_to), y asignadas al vendedor autenticado
         (PromotionSalesperson). El vendedor nunca ve las inactivas, las
@@ -2380,8 +2478,9 @@ paths:
       tags: [promotions]
       summary: Detalle de una promoción (desde la perspectiva del vendedor)
       description: >
-        ★ v0.28.0. REQUIERE VENDEDOR o ANALISTA_COMERCIAL. 403 si la
-        promoción no está asignada al vendedor autenticado.
+        ★ v0.29.0 — REQUIERE VENDEDOR, ANALISTA_COMERCIAL o
+        VENDEDOR_INSTITUCIONAL. 403 si la promoción no está asignada al
+        salesperson_code del token, sin distinción de rol.
       parameters:
         - name: promotion_id
           in: path
@@ -2396,6 +2495,68 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  # ═══════════════════════════════════════════════════════════════
+  # ★ NUEVO v0.29.0 — "MIS ÓRDENES" DEL VENDEDOR INSTITUCIONAL
+  # ═══════════════════════════════════════════════════════════════
+  # Endpoint aparte a propósito, NO una variante de /admin/orders: allí
+  # salesperson_code es un filtro OPCIONAL que elige el cliente, y aquí el
+  # alcance es una GARANTÍA del servidor. Misma query por debajo.
+
+  /my-orders:
+    get:
+      tags: [orders]
+      summary: Órdenes tomadas por el vendedor institucional autenticado
+      description: >
+        ★ v0.29.0. REQUIERE rol VENDEDOR_INSTITUCIONAL (cualquier otro rol,
+        ADMIN incluido, recibe 403 — esta NO es una segunda puerta a la
+        grilla del Dashboard).
+
+        El salesperson_code sale SIEMPRE del token, nunca del request. No
+        existe un parámetro salesperson_code en este endpoint: uno enviado
+        en la query se ignora en silencio (no es 400 ni 403, el resultado
+        simplemente no depende de él).
+
+        NO expone held_count: ese contador es global (todas las
+        RETENIDA_CARTERA de la empresa, sin aplicar filtro por vendedor) y
+        existe solo para el badge del ADMIN en GET /admin/orders.
+
+        Sin filtro por client_code (no aplica al caso de uso) ni por fecha
+        (tampoco existe hoy en /admin/orders).
+
+        403 con code=salesperson_code_missing si la cuenta autenticada no
+        tiene salesperson_code: sin código no hay "mis órdenes" que acotar.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/OrderStatus' }
+          description: Filtra por estado DENTRO de las órdenes propias.
+      responses:
+        '200':
+          description: Página de órdenes propias
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page: { type: integer }
+                  page_size: { type: integer }
+                  total:
+                    type: integer
+                    description: Total de órdenes PROPIAS que cumplen el filtro.
+                  orders:
+                    type: array
+                    items: { $ref: '#/components/schemas/OrderSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: >
+            Rol distinto de VENDEDOR_INSTITUCIONAL, o cuenta sin
+            salesperson_code (code=salesperson_code_missing).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /admin/orders:
 
@@ -2650,7 +2811,30 @@ paths:
     put:
       tags: [admin]
       summary: Autorizar (o quitar) la lista de precios adicional
-      description: REQUIERE rol ADMIN.
+      description: >
+        ★ v0.29.0 — REQUIERE rol ADMIN o ANALISTA_COMERCIAL.
+        ANALISTA_COMERCIAL es quien opera esto en el día a día (habilita
+        Lista2 a un cliente concreto); ADMIN mantiene acceso universal de
+        respaldo, mismo patrón que las bandejas de Pagos/Créditos.
+
+        Modelo de negocio que este endpoint implementa: Lista3 es el
+        precio por DEFECTO de todo cliente (default_price_list) — no es
+        una elección del vendedor. Lista2 es una EXCEPCIÓN que se otorga
+        cliente por cliente a través de aquí. SAP no valida listas: obedece
+        el precio que el WMS le reporta y solo registra qué PriceList se
+        usó.
+
+        Nota técnica: este endpoint vive en su propio controller (no en
+        AdminController) porque en ASP.NET Core los [Authorize] de clase y
+        de método son ACUMULATIVOS (AND, no sustitutivos) — no se puede
+        aflojar por método el rol que exige la clase entera. La ruta
+        pública no cambió.
+
+        Cada cambio efectivo (no los 400/404) se registra en los logs del
+        servidor con client_code, el valor nuevo y el username de quien lo
+        hizo — para distinguir cuál de los dos roles autorizados operó,
+        dado el impacto directo sobre qué precios puede aplicar un vendedor
+        a ese cliente.
       parameters:
         - name: client_code
           in: path
@@ -3882,9 +4066,17 @@ paths:
       tags: [dispatch-admin]
       summary: Lista de vendedores (para atribuir un pago reportado desde el Dashboard)
       description: >
-        ★ v0.19.2 — REQUIERE ADMIN. Los usuarios con Role=VENDEDOR, para el
-        selector obligatorio de salesperson_code en la pantalla "Reportar
-        Pago" del Dashboard. Mismo patrón que /admin/drivers.
+        ★ v0.19.2 — REQUIERE ADMIN. Para el selector obligatorio de
+        salesperson_code en la pantalla "Reportar Pago" del Dashboard.
+        Mismo patrón que /admin/drivers.
+
+        ★ v0.29.0 — el criterio es TENER salesperson_code, no el rol de
+        login. Antes filtraba por Role=VENDEDOR, lo que dejaba fuera al
+        VENDEDOR_INSTITUCIONAL sin razón de negocio: Role es la capa de
+        autorización del WMS y SAP no tiene ningún concepto de rol (el
+        espejo SapSalespersons solo trae salesperson_code, name, is_active).
+        Las cuentas sin código (ADMIN, BODEGUERO, DRIVER, APROBADOR_*,
+        ANALISTA_COMERCIAL) siguen fuera, pero por no tener código.
       responses:
         '200':
           description: Lista de vendedores
@@ -3960,6 +4152,15 @@ paths:
         espejo SAP, no se recibe en el body. La respuesta 201 SÍ devuelve
         cuerpo (salesperson_code, username, display_name del vendedor
         creado) — no queda vacía.
+
+        ★ v0.29.0 — sin cambio de firma salvo el nuevo campo OPCIONAL
+        `role` en el body (VENDEDOR | VENDEDOR_INSTITUCIONAL, default
+        VENDEDOR). El 409 salesperson_already_provisioned aplica
+        independientemente del rol solicitado en este request: un
+        salesperson_code admite UNA SOLA cuenta de login, sea VENDEDOR o
+        VENDEDOR_INSTITUCIONAL. GET
+        /admin/sap-salespersons.has_login_account sigue siendo un booleano
+        simple, no distingue por rol.
       requestBody:
         required: true
         content:
@@ -3968,9 +4169,27 @@ paths:
               type: object
               required: [salesperson_code, username, password]
               properties:
-                salesperson_code: { type: string, description: "Debe existir en SapSalespersons." }
+                salesperson_code:
+                  type: string
+                  description: >
+                    Debe existir en SapSalespersons (espejo real de SAP) y no
+                    tener ya una cuenta de login provisionada — la regla del 409
+                    aplica sin importar el rol solicitado.
                 username: { type: string }
                 password: { type: string, minLength: 8 }
+                role:
+                  type: string
+                  enum: [VENDEDOR, VENDEDOR_INSTITUCIONAL]
+                  default: VENDEDOR
+                  description: >
+                    ★ v0.29.0. Rol de la cuenta a provisionar. Omitir este
+                    campo equivale a VENDEDOR (compatibilidad total con
+                    clientes existentes de este endpoint). No acepta ningún
+                    otro valor de Role: BODEGUERO/DRIVER se provisionan vía
+                    POST /admin/staff/provision (v0.24.0);
+                    ADMIN/APROBADOR_PAGOS/APROBADOR_CREDITOS/
+                    ANALISTA_COMERCIAL no se provisionan por esta vía en
+                    absoluto.
       responses:
         '201':
           description: Cuenta de vendedor creada
@@ -3982,8 +4201,18 @@ paths:
                   salesperson_code: { type: string }
                   username: { type: string }
                   display_name: { type: string }
+                  role:
+                    type: string
+                    enum: [VENDEDOR, VENDEDOR_INSTITUCIONAL]
+                    description: >
+                      ★ v0.29.0. Eco del rol efectivamente asignado (VENDEDOR
+                      si el request omitió el campo).
         '400':
-          description: salesperson_code no existe en SapSalespersons (code=salesperson_code_not_found), o password muy corta (code=password_too_short)
+          description: >
+            salesperson_code no existe en SapSalespersons
+            (code=salesperson_code_not_found), password muy corta
+            (code=password_too_short), o ★ v0.29.0 role fuera de
+            [VENDEDOR, VENDEDOR_INSTITUCIONAL] (code=invalid_salesperson_role).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4011,13 +4240,21 @@ paths:
   /admin/staff:
     get:
       tags: [dispatch-admin]
-      summary: Lista el personal de bodega/reparto ya creado (BODEGUERO, DRIVER)
+      summary: Lista el personal interno ya creado (BODEGUERO, DRIVER, ANALISTA_COMERCIAL)
       description: >
+        ★ v0.29.0 — el filtro pasa a Role IN (BODEGUERO, DRIVER,
+        ANALISTA_COMERCIAL); antes solo los dos primeros.
+        ANALISTA_COMERCIAL entra a este grupo (y no al de
+        /admin/salespersons/provision) porque, igual que BODEGUERO y
+        DRIVER, NO es un concepto de SAP y nunca lo será: es personal
+        interno del WMS, sin salesperson_code, identificado únicamente por
+        su rol de login.
+
         ★ v0.24.0. REQUIERE ADMIN. A diferencia de /admin/sap-salespersons,
         esto NO lee ningún espejo de SAP — lista directo la tabla de login
-        (Salespersons) filtrada a Role IN (BODEGUERO, DRIVER). No hay
-        "pendientes de aprovisionar" que mostrar, porque no existen fuera
-        del WMS hasta que se crean aquí.
+        (Salespersons). No hay "pendientes de aprovisionar" que mostrar,
+        porque estas cuentas no existen fuera del WMS hasta que se crean
+        aquí.
       responses:
         '200':
           description: Lista de personal
@@ -4040,15 +4277,24 @@ paths:
   /admin/staff/provision:
     post:
       tags: [dispatch-admin]
-      summary: ADMIN crea una cuenta nueva de BODEGUERO o DRIVER desde cero
+      summary: ADMIN crea una cuenta nueva de personal interno del WMS desde cero
       description: >
+        ★ v0.29.0 — role admite BODEGUERO, DRIVER o ANALISTA_COMERCIAL
+        (antes solo los dos primeros). 400 code=invalid_staff_role para
+        cualquier otro valor.
+
+        Las dos vías de alta del proyecto son disjuntas y complementarias:
+        POST /admin/salespersons/provision crea los roles que llevan
+        salesperson_code real de SAP (VENDEDOR, VENDEDOR_INSTITUCIONAL);
+        este endpoint crea los que NO existen en SAP (BODEGUERO, DRIVER,
+        ANALISTA_COMERCIAL). ADMIN, APROBADOR_PAGOS y APROBADOR_CREDITOS
+        no tienen todavía vía de alta por API — el primer ADMIN sale del
+        bootstrap y los dos aprobadores, hoy, solo del seed.
+
         ★ v0.24.0. REQUIERE ADMIN. Crea una cuenta de login real
         (Salespersons) SIN ningún vínculo a SAP (Code queda null) — a
         diferencia de /admin/salespersons/provision, aquí no hay
-        salesperson_code que validar, porque BODEGUERO/DRIVER no existen
-        en SAP. role debe ser BODEGUERO o DRIVER (400,
-        code=invalid_staff_role, si se manda otro rol — VENDEDOR/ADMIN/
-        APROBADOR_* no se crean por este endpoint). El ADMIN define
+        salesperson_code que validar. El ADMIN define
         display_name y la contraseña inicial manualmente — mínimo 8
         caracteres (400, code=password_too_short). 409
         (code=username_taken) si el username ya pertenece a OTRA cuenta
@@ -4066,7 +4312,10 @@ paths:
                 display_name: { type: string }
                 role:
                   type: string
-                  enum: [BODEGUERO, DRIVER]
+                  enum: [BODEGUERO, DRIVER, ANALISTA_COMERCIAL]
+                  description: >
+                    ★ v0.29.0 — se agrega ANALISTA_COMERCIAL. Ningún otro
+                    valor de Role es válido aquí.
       responses:
         '201':
           description: Cuenta de personal creada
@@ -4079,7 +4328,10 @@ paths:
                   display_name: { type: string }
                   role: { $ref: '#/components/schemas/Role' }
         '400':
-          description: role inválido (code=invalid_staff_role), o password muy corta (code=password_too_short)
+          description: >
+            role inválido — debe ser BODEGUERO, DRIVER o ANALISTA_COMERCIAL
+            (code=invalid_staff_role) — o password muy corta
+            (code=password_too_short)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4795,8 +5047,25 @@ components:
     # ★ v0.17.0 — AGREGADOS APROBADOR_PAGOS, APROBADOR_CREDITOS
     Role:
       type: string
-      enum: [VENDEDOR, ADMIN, BODEGUERO, DRIVER, APROBADOR_PAGOS, APROBADOR_CREDITOS, ANALISTA_COMERCIAL]
-      description: ★ v0.28.0 — se agrega ANALISTA_COMERCIAL para gestión de promociones.
+      enum:
+        - ADMIN
+        - VENDEDOR
+        - VENDEDOR_INSTITUCIONAL
+        - BODEGUERO
+        - DRIVER
+        - APROBADOR_PAGOS
+        - APROBADOR_CREDITOS
+        - ANALISTA_COMERCIAL
+      description: >
+        ★ v0.28.0 — se agrega ANALISTA_COMERCIAL para gestión de promociones.
+
+        ★ v0.29.0 — se agrega VENDEDOR_INSTITUCIONAL: rol distinto de
+        VENDEDOR y de ANALISTA_COMERCIAL. Opera desde el Dashboard (no la
+        app iOS), tiene salesperson_code propio (mismo esquema que
+        VENDEDOR), puede tomar pedidos (POST /orders, mismo pipeline que la
+        app de vendedores, sin campo de canal) y puede aplicar descuento por
+        línea SIN el tope que en el futuro aplicará a VENDEDOR normal — ver
+        OrderLine.line_discount_pct.
 
     # ═══════════════ ★ NUEVO v0.17.0 — PAGOS DE CARTERA Y CRÉDITOS ═══════════════
     ApprovalStatus:
@@ -5011,7 +5280,19 @@ components:
                     type: number
                     format: double
                     nullable: true
-                    description: OrderLine.LineDiscountPct. Puede ser 100 (promoción legítima).
+                    description: >
+                      OrderLine.LineDiscountPct. Puede ser 100 (promoción
+                      legítima). NULL se interpreta como 0.00 en el builder
+                      del snapshot (tarea 19).
+
+                      Nota de contexto (v0.29.0, no verificable desde este
+                      dato — no existe campo de origen/canal en el modelo,
+                      por diseño): el carrito del Dashboard (rol
+                      VENDEDOR_INSTITUCIONAL) nunca envía null en
+                      OrderLine.line_discount_pct (ver nota en ese campo) —
+                      hereda el valor sin transformación. Esto reduce, pero
+                      no elimina desde el propio dato, la ambigüedad de un
+                      0.00 en filas creadas por ese rol.
                   expected_line_total:
                     type: number
                     format: double
@@ -6922,7 +7203,23 @@ components:
           format: double
           minimum: 0
           maximum: 100
-          description: 100 ES VÁLIDO (ítem gratis de una promoción).
+          description: >
+            100 ES VÁLIDO (ítem gratis de una promoción).
+
+            ★ v0.29.0 — sin cambio de tipo, nota de negocio nueva. NULL se
+            interpreta como 0.00 en el builder del snapshot de order-invoices
+            (ya implementado, tarea 19) — el mismo criterio aplica aquí: el
+            cliente debe enviar 0.00 explícito cuando no hay descuento, nunca
+            omitir el campo ni enviar null.
+
+            Regla de tope por rol (diseño intencional, no un tope pendiente de
+            implementar):
+            - VENDEDOR (app-sales): en el futuro tendrá un tope máximo
+              configurable por ADMIN. Hoy no hay enforcement porque esa config
+              de Admin aún no existe.
+            - VENDEDOR_INSTITUCIONAL (Dashboard): SIN tope de validación
+              server-side, de forma permanente e intencional. Cuando se
+              implemente el tope para VENDEDOR, NO debe aplicarse a este rol.
         promotion_group_id:
           type: string
           format: uuid
